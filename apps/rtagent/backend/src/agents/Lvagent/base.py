@@ -21,6 +21,7 @@ load_dotenv()
 
 from .transport import WebSocketTransport
 from .audio_io import MicSource, SpeakerSink, pcm_to_base64
+from utils.azure_auth import get_credential
 
 logger = get_logger(__name__)
 
@@ -89,6 +90,7 @@ class AzureLiveVoiceAgent:
         model: LvaModel,
         binding: LvaAgentBinding,
         session: Optional[LvaSessionCfg] = None,
+        enable_audio_io: bool = True,
     ) -> None:
         """
         Initialize Azure Live Voice Agent with simplified configuration.
@@ -104,6 +106,7 @@ class AzureLiveVoiceAgent:
         self._model = model
         self._binding = binding
         self._session = session or LvaSessionCfg()
+        self._enable_audio_io = enable_audio_io
         
         # Get configuration from environment (matching your .env file)
         self._endpoint = os.getenv("AZURE_VOICE_LIVE_ENDPOINT")
@@ -118,14 +121,15 @@ class AzureLiveVoiceAgent:
         
         # Try token-based authentication first
         try:
-            credential = DefaultAzureCredential()
-            token = credential.get_token("https://ai.azure.com/.default")
+            credential = get_credential()
+            # Voice Live WS header expects Cognitive Services scope
+            voice_token = credential.get_token("https://cognitiveservices.azure.com/.default")
             self._auth_headers = {
-                "Authorization": f"Bearer {token.token}",
+                "Authorization": f"Bearer {voice_token.token}",
                 "x-ms-client-request-id": str(uuid.uuid4())
             }
             self._auth_method = "token"
-            logger.info("Using token-based authentication")
+            logger.info("Using token-based authentication (cognitiveservices scope)")
         except Exception as e:
             logger.warning(f"Token authentication failed: {e}")
             if self._api_key:
@@ -141,13 +145,13 @@ class AzureLiveVoiceAgent:
         # Build WebSocket URL (matches working notebook pattern)
         azure_ws_endpoint = self._endpoint.rstrip('/').replace("https://", "wss://")
         
-        # Get additional authentication token for agent access
+        # Get additional authentication token for agent access (AI Foundry)
         try:
             agent_token = credential.get_token("https://ai.azure.com/.default")
         except Exception as e:
             logger.warning(f"Failed to get agent token: {e}")
             # Fallback to the same voice token
-            agent_token = token
+            agent_token = voice_token
         
         # Agent connection URL with project name, agent ID, and agent access token
         self._url = (
@@ -168,9 +172,12 @@ class AzureLiveVoiceAgent:
         # Initialize WebSocket transport
         self._ws = WebSocketTransport(self._url, self._auth_headers)
         
-        # Audio I/O setup
-        self._src = MicSource(sample_rate=DEFAULT_SAMPLE_RATE_HZ)
-        self._sink = SpeakerSink(sample_rate=DEFAULT_SAMPLE_RATE_HZ)
+        # Audio I/O setup (optional; disabled in server path)
+        self._src: Optional[MicSource] = None
+        self._sink: Optional[SpeakerSink] = None
+        if self._enable_audio_io:
+            self._src = MicSource(sample_rate=DEFAULT_SAMPLE_RATE_HZ)
+            self._sink = SpeakerSink(sample_rate=DEFAULT_SAMPLE_RATE_HZ)
         self._frames = int(DEFAULT_SAMPLE_RATE_HZ * (DEFAULT_CHUNK_MS / 1000))
 
     def _session_update(self) -> Dict[str, Any]:
@@ -247,7 +254,8 @@ class AzureLiveVoiceAgent:
                 delta = evt.get("delta", "")
                 if delta:
                     audio_bytes = base64.b64decode(delta)
-                    self._sink.write(audio_bytes)
+                    if self._sink is not None:
+                        self._sink.write(audio_bytes)
             except Exception as e:
                 logger.warning(f"Audio delta processing failed: {e}")
                 
@@ -302,23 +310,25 @@ class AzureLiveVoiceAgent:
             # Connect to the service
             self.connect()
             
-            # Start audio I/O
-            self._src.start()
-            self._sink.start()
+            # Start audio I/O if enabled
+            if self._enable_audio_io and self._src is not None and self._sink is not None:
+                self._src.start()
+                self._sink.start()
             
             logger.info("Starting audio streaming loop")
             
             try:
                 while True:
-                    # Send microphone audio to the service
-                    pcm = self._src.read(self._frames)
-                    if pcm is not None and len(pcm) > 0:
-                        audio_message = {
-                            "type": "input_audio_buffer.append",
-                            "audio": pcm_to_base64(pcm),
-                            "event_id": str(uuid.uuid4())
-                        }
-                        self._ws.send_dict(audio_message)
+                    # Send microphone audio to the service (only if audio I/O enabled)
+                    if self._enable_audio_io and self._src is not None:
+                        pcm = self._src.read(self._frames)
+                        if pcm is not None and len(pcm) > 0:
+                            audio_message = {
+                                "type": "input_audio_buffer.append",
+                                "audio": pcm_to_base64(pcm),
+                                "event_id": str(uuid.uuid4())
+                            }
+                            self._ws.send_dict(audio_message)
                     
                     # Process incoming events (non-blocking)
                     raw_event = self._ws.recv(timeout_s=0.01)
@@ -334,8 +344,10 @@ class AzureLiveVoiceAgent:
         finally:
             # Cleanup
             try:
-                self._src.stop()
-                self._sink.stop()
+                if self._src is not None:
+                    self._src.stop()
+                if self._sink is not None:
+                    self._sink.stop()
                 self._ws.close()
                 logger.info("Audio streaming stopped and connections closed")
             except Exception as e:
@@ -363,12 +375,25 @@ class AzureLiveVoiceAgent:
     def close(self) -> None:
         """Close the connection and cleanup resources."""
         try:
-            self._src.stop()
-            self._sink.stop()
+            if self._src is not None:
+                self._src.stop()
+            if self._sink is not None:
+                self._sink.stop()
             self._ws.close()
             logger.info("Azure Live Voice Agent connection closed")
         except Exception as e:
             logger.warning(f"Error during cleanup: {e}")
+
+    # ------------------------------------------------------------------ #
+    # Lightweight helpers for integration layers
+    # ------------------------------------------------------------------ #
+    def send_event(self, payload: Dict[str, Any]) -> None:
+        """Send an event dict to the Voice Live transport."""
+        self._ws.send_dict(payload)
+
+    def recv_raw(self, *, timeout_s: float = 0.0) -> Optional[str]:
+        """Receive a raw JSON event string from the transport if available."""
+        return self._ws.recv(timeout_s=timeout_s)
 
     @property
     def url(self) -> str:

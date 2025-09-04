@@ -58,7 +58,7 @@ def _load_yaml(path: str | Path) -> Dict[str, Any]:
     return _resolve_env(data)  # type: ignore[return-value]
 
 
-def build_lva_from_yaml(path: str | Path) -> AzureLiveVoiceAgent:
+def build_lva_from_yaml(path: str | Path, *, enable_audio_io: Optional[bool] = None) -> AzureLiveVoiceAgent:
     """
     Build AzureLiveVoiceAgent from YAML configuration file.
     
@@ -106,10 +106,16 @@ def build_lva_from_yaml(path: str | Path) -> AzureLiveVoiceAgent:
         vad_silence_ms=int(session_cfg.get("vad_silence_ms", 1000)),
     )
 
+    # Determine audio I/O behavior (default True unless explicitly overridden)
+    audio_io = enable_audio_io
+    if audio_io is None:
+        audio_io = bool(cfg.get("enable_audio_io", True))
+
     agent = AzureLiveVoiceAgent(
-        model=model, 
-        binding=binding, 
-        session=session
+        model=model,
+        binding=binding,
+        session=session,
+        enable_audio_io=audio_io,
     )
     
     logger.info(

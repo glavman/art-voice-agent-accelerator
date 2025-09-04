@@ -480,6 +480,7 @@ async def _create_media_handler(
             session_id=session_id,
             websocket=websocket,
             orchestrator=orchestrator,
+            use_lva_agent=True,
         )
 
         logger.info("Created V1 ACS voice live handler for VOICE_LIVE mode")

@@ -15,20 +15,14 @@ import json
 import asyncio
 import base64
 import logging
-import threading
 import time
 import numpy as np
 from datetime import datetime, timezone
 from typing import Dict, Union, Literal, Optional, Set, Callable, Awaitable
-from typing_extensions import AsyncIterator, TypedDict, Required
-from websockets.asyncio.client import connect as ws_connect
-from websockets.asyncio.client import ClientConnection as AsyncWebsocket
-from websockets.asyncio.client import HeadersLike
-from websockets.typing import Data
-from websockets.exceptions import WebSocketException
-from azure.core.credentials_async import AsyncTokenCredential
-from utils.azure_auth import get_credential
+from typing_extensions import TypedDict, Required
 from utils.ml_logging import get_logger
+from apps.rtagent.backend.src.agents.Lvagent.factory import build_lva_from_yaml
+from apps.rtagent.backend.src.agents.Lvagent.base import AzureLiveVoiceAgent
 
 logger = get_logger("api.v1.handlers.voice_live_handler")
 
@@ -80,130 +74,7 @@ class SessionUpdateEventParam(TypedDict, total=False):
     event_id: str
 
 
-class AsyncVoiceLiveSessionResource:
-    def __init__(self, connection: "AsyncVoiceLiveConnection") -> None:
-        self._connection = connection
-
-    async def update(
-        self,
-        *,
-        session: Session,
-        event_id: str | None = None,
-    ) -> None:
-        param: SessionUpdateEventParam = {
-            "type": "session.update",
-            "session": session,
-            "event_id": event_id or str(uuid.uuid4()),
-        }
-        data = json.dumps(param)
-        await self._connection.send(data)
-
-
-class AsyncVoiceLiveConnection:
-    session: AsyncVoiceLiveSessionResource
-    _connection: AsyncWebsocket
-
-    def __init__(self, url: str, additional_headers: HeadersLike) -> None:
-        self._url = url
-        self._additional_headers = additional_headers
-        self._connection = None
-        self.session = AsyncVoiceLiveSessionResource(self)
-
-    async def __aenter__(self) -> "AsyncVoiceLiveConnection":
-        try:
-            self._connection = await ws_connect(
-                self._url, additional_headers=self._additional_headers
-            )
-        except WebSocketException as e:
-            raise ValueError(f"Failed to establish a WebSocket connection: {e}")
-        return self
-
-    async def __aexit__(self, exc_type, exc_value, traceback) -> None:
-        if self._connection:
-            await self._connection.close()
-            self._connection = None
-
-    async def __aiter__(self) -> AsyncIterator[Data]:
-        async for data in self._connection:
-            yield data
-
-    async def recv(self) -> Data:
-        return await self._connection.recv()
-
-    async def send(self, message: Data) -> None:
-        await self._connection.send(message)
-
-
-class AsyncAzureVoiceLive:
-    def __init__(
-        self,
-        *,
-        azure_endpoint: str | None = None,
-        api_version: str | None = "2025-05-01-preview",
-        api_key: str | None = None,
-        azure_ad_token_credential: AsyncTokenCredential | None = None,
-    ) -> None:
-        if azure_endpoint is None:
-            azure_endpoint = os.environ.get("AZURE_VOICE_LIVE_ENDPOINT")
-
-        if azure_endpoint is None:
-            raise ValueError(
-                "Must provide the 'azure_endpoint' argument, or the 'AZURE_VOICE_LIVE_ENDPOINT' environment variable"
-            )
-
-        if api_key is None and azure_ad_token_credential is None:
-            api_key = os.environ.get("AZURE_VOICE_LIVE_API_KEY")
-
-        if api_key is None and azure_ad_token_credential is None:
-            azure_ad_token_credential = get_credential()
-
-        if api_key and azure_ad_token_credential:
-            raise ValueError(
-                "Duplicating credentials. Please pass one of 'api_key' and 'azure_ad_token_credential'"
-            )
-
-        self._api_key = api_key
-        self._azure_endpoint = azure_endpoint
-        self._api_version = api_version
-        self._azure_ad_token_credential = azure_ad_token_credential
-        self._connection = None
-
-    def get_token(self) -> str:
-        if self._azure_ad_token_credential:
-            scopes = "https://cognitiveservices.azure.com/.default"
-            token = self._azure_ad_token_credential.get_token(scopes)
-            return token.token
-        else:
-            return None
-
-    async def connect(self, model: str) -> AsyncVoiceLiveConnection:
-        if self._connection is not None:
-            raise ValueError("Already connected to the Azure Voice Agent service.")
-        if not model:
-            raise ValueError("Model name is required.")
-        if not isinstance(model, str):
-            raise TypeError(
-                f"The 'model' parameter must be of type 'str', but got {type(model).__name__}."
-            )
-
-        url = f"{self._azure_endpoint.rstrip('/')}/voice-agent/realtime?api-version={self._api_version}&model={model}"
-        url = url.replace("https://", "wss://")
-
-        auth_header = {}
-        if self._azure_ad_token_credential:
-            token = self.get_token()
-            auth_header = {"Authorization": f"Bearer {token}"}
-        elif self._api_key:
-            auth_header = {"api-key": self._api_key}
-
-        request_id = uuid.uuid4()
-        headers = {"x-ms-client-request-id": str(request_id), **auth_header}
-
-        self._connection = AsyncVoiceLiveConnection(
-            url,
-            additional_headers=headers,
-        )
-        return self._connection
+# Removed legacy async client/connection in favor of AzureLiveVoiceAgent
 
 
 class VoiceLiveHandler:
@@ -221,6 +92,9 @@ class VoiceLiveHandler:
         azure_endpoint: str,
         model_name: str = "gpt-4o-mini",
         orchestrator: Optional[Callable] = None,
+        *,
+        agent_yaml: Optional[str] = None,
+        use_lva_agent: bool = True,
     ):
         self.session_id = session_id
         self.websocket = websocket
@@ -231,6 +105,13 @@ class VoiceLiveHandler:
         # Connection state
         self.voice_live_client = None
         self.voice_live_connection = None
+        # Optional Azure Live Voice Agent (shared implementation)
+        self._lva_agent: Optional[AzureLiveVoiceAgent] = None
+        self._lva_yaml: str = (
+            agent_yaml
+            or "apps/rtagent/backend/src/agents/Lvagent/agent_store/auth_agent.yaml"
+        )
+        self._use_lva_agent: bool = use_lva_agent
         self.is_running = False
 
         # Audio format configuration from metadata
@@ -239,7 +120,8 @@ class VoiceLiveHandler:
         self.channels = 1  # Default
 
         # Background tasks
-        self.receive_task = None
+        self._lva_event_task: Optional[asyncio.Task] = None
+        self._sent_greeting: bool = False
 
         logger.info(f"VoiceLiveHandler initialized for session {session_id}")
 
@@ -251,56 +133,29 @@ class VoiceLiveHandler:
         """
         try:
             logger.info(f"Starting voice live handler for session {self.session_id}")
-
-            # Create Azure Voice Live client
-            self.voice_live_client = AsyncAzureVoiceLive(
-                azure_endpoint=self.azure_endpoint,
-                azure_ad_token_credential=get_credential(),
-            )
-
-            # Connect to Azure Voice Live API
-            self.voice_live_connection = await self.voice_live_client.connect(
-                model=self.model_name
-            )
-
-            # Start connection
-            logger.info(
-                f"Establishing Azure Voice Live WebSocket connection for session {self.session_id}"
-            )
+            # Optionally also connect the shared Azure Live Voice Agent for testing
             try:
-                await self.voice_live_connection.__aenter__()
+                self._lva_agent = build_lva_from_yaml(self._lva_yaml, enable_audio_io=False)
+                # Connect in a worker thread to avoid blocking the loop
+                await asyncio.to_thread(self._lva_agent.connect)
                 logger.info(
-                    f"Azure Voice Live WebSocket connection established for session {self.session_id}"
+                    "LVA agent connected | url=%s | auth=%s",
+                    getattr(self._lva_agent, "url", "(hidden)"),
+                    getattr(self._lva_agent, "auth_method", "unknown"),
                 )
-
-                # Verify connection state
-                if (
-                    hasattr(self.voice_live_connection, "_connection")
-                    and self.voice_live_connection._connection
-                ):
-                    logger.info(
-                        f"WebSocket connection object verified for session {self.session_id}"
-                    )
-                else:
-                    logger.warning(
-                        f"WebSocket connection object not properly initialized for session {self.session_id}"
-                    )
-
-            except Exception as conn_error:
-                logger.error(
-                    f"Failed to establish Azure Voice Live connection for session {self.session_id}: {conn_error}"
-                )
+            except Exception as e:
+                logger.error("Failed to connect LVA agent: %s", e)
                 raise
-
-            # Configure session
-            await self._configure_session()
 
             # Start background tasks
             self.is_running = True
-            # Only start receive task - sending is handled by media.py loop calling handle_audio_data
-            logger.info(f"Starting receive task for session {self.session_id}")
-            self.receive_task = asyncio.create_task(self._receive_audio_loop())
-            logger.info(f"Receive task started for session {self.session_id}")
+            logger.info(
+                f"Starting LVA agent event loop for session {self.session_id}"
+            )
+            self._lva_event_task = asyncio.create_task(self._lva_event_loop())
+            logger.info(
+                f"LVA agent event loop started for session {self.session_id}"
+            )
 
             # Give the receive task a moment to start
             await asyncio.sleep(0.1)
@@ -328,20 +183,21 @@ class VoiceLiveHandler:
             # Stop processing
             self.is_running = False
 
-            # Cancel background tasks
-            if self.receive_task and not self.receive_task.done():
-                self.receive_task.cancel()
+            # Cancel background task
+            if self._lva_event_task and not self._lva_event_task.done():
+                self._lva_event_task.cancel()
                 try:
-                    await self.receive_task
+                    await self._lva_event_task
                 except asyncio.CancelledError:
                     pass
 
-            # Close Azure Voice Live connection
-            if self.voice_live_connection:
-                await self.voice_live_connection.__aexit__(None, None, None)
-                self.voice_live_connection = None
-
-            self.voice_live_client = None
+            # Close optional LVA agent if used
+            if self._lva_agent:
+                try:
+                    await asyncio.to_thread(self._lva_agent.close)
+                except Exception:
+                    pass
+                self._lva_agent = None
 
             logger.info(
                 f"Voice live handler stopped successfully for session {self.session_id}"
@@ -371,9 +227,10 @@ class VoiceLiveHandler:
             )
             return
 
-        if not self.voice_live_connection:
+        # Ensure an upstream connection is ready (LVA agent or legacy client)
+        if not self._lva_agent:
             logger.warning(
-                f"Received message while voice live connection not available in session {self.session_id}"
+                f"Received message while LVA agent not available in session {self.session_id}"
             )
             return
 
@@ -383,18 +240,21 @@ class VoiceLiveHandler:
                 # Parse JSON message structure
                 try:
                     message = json.loads(message_data)
-                    message_kind = message.get("kind", "unknown")
+                    # Accept both 'kind' and 'Kind' from ACS
+                    message_kind = message.get("kind", message.get("Kind", "unknown"))
 
                     # Track message types
                     if message_kind == "AudioData":
-                        logger.info(f"Session {self.session_id}: Processing audio data")
+                        logger.debug(f"Session {self.session_id}: Processing audio data")
                     elif message_kind == "AudioMetadata":
                         logger.info(
                             f"📋 Session {self.session_id}: Processing audio metadata"
                         )
 
                     # Use asyncio.create_task to ensure these don't block the main processing loop
-                    if message_kind == "AudioData" and "audioData" in message:
+                    if message_kind == "AudioData" and (
+                        "audioData" in message or "AudioData" in message
+                    ):
                         asyncio.create_task(self._handle_audio_data_message(message))
                     elif message_kind == "AudioMetadata":
                         asyncio.create_task(
@@ -433,28 +293,21 @@ class VoiceLiveHandler:
     async def _handle_audio_data_message(self, message: dict) -> None:
         """Handle AudioData messages."""
         try:
-            # Check connection state first
-            if (
-                not self.voice_live_connection
-                or not self.voice_live_connection._connection
-            ):
+            # Check connection state first (LVA only)
+            if not self._lva_agent:
                 logger.warning(
-                    f"Voice Live connection not available for session {self.session_id}"
+                    f"LVA agent not available for session {self.session_id}"
                 )
                 return
 
-            # Check if connection is already closed
-            if (
-                hasattr(self.voice_live_connection._connection, "closed")
-                and self.voice_live_connection._connection.closed
-            ):
-                logger.info(
-                    f"Voice Live connection already closed for session {self.session_id}"
+            # Accept both casing variants from ACS
+            audio_payload = message.get("audioData") or message.get("AudioData") or {}
+            audio_data = audio_payload.get("data")
+            if not audio_data:
+                logger.warning(
+                    f"AudioData payload missing 'data' field in session {self.session_id}"
                 )
-                self.is_running = False
                 return
-
-            audio_data = message["audioData"]["data"]
             # The data is already base64 encoded
             audio_b64 = audio_data
 
@@ -462,7 +315,7 @@ class VoiceLiveHandler:
             try:
                 audio_bytes = base64.b64decode(audio_b64)
                 # Simple audio tracking
-                logger.info(
+                logger.debug(
                     f"Session {self.session_id}: Sending {len(audio_bytes)} byte audio chunk to Azure"
                 )
             except Exception as decode_error:
@@ -478,7 +331,7 @@ class VoiceLiveHandler:
             }
 
             try:
-                await self.voice_live_connection.send(json.dumps(audio_event))
+                self._lva_agent.send_event(audio_event)
                 logger.debug(
                     f"[AUDIO SEND] Session {self.session_id}: Successfully sent audio chunk to Azure Voice Live"
                 )
@@ -558,22 +411,10 @@ class VoiceLiveHandler:
     async def _send_greeting(self) -> None:
         """Send greeting message to Azure Voice Live to have the agent speak."""
         try:
-            if (
-                not self.voice_live_connection
-                or not self.voice_live_connection._connection
-            ):
+            # Ensure upstream is available for the selected path
+            if not self._lva_agent:
                 logger.warning(
-                    f"Cannot send greeting - Voice Live connection not available for session {self.session_id}"
-                )
-                return
-
-            # Check if connection is already closed
-            if (
-                hasattr(self.voice_live_connection._connection, "closed")
-                and self.voice_live_connection._connection.closed
-            ):
-                logger.warning(
-                    f"Cannot send greeting - Voice Live connection already closed for session {self.session_id}"
+                    f"Cannot send greeting - LVA agent not available for session {self.session_id}"
                 )
                 return
 
@@ -600,7 +441,7 @@ class VoiceLiveHandler:
                 "event_id": str(uuid.uuid4()),
             }
 
-            await self.voice_live_connection.send(json.dumps(greeting_event))
+            self._lva_agent.send_event(greeting_event)
             logger.info(
                 f"[GREETING SENT] Session {self.session_id}: Successfully sent greeting: '{greeting_text}'"
             )
@@ -631,7 +472,12 @@ class VoiceLiveHandler:
                 "event_id": str(uuid.uuid4()),
             }
 
-            await self.voice_live_connection.send(json.dumps(dtmf_event))
+            if not self._lva_agent:
+                logger.warning(
+                    f"Cannot send DTMF - LVA agent not available for session {self.session_id}"
+                )
+                return
+            self._lva_agent.send_event(dtmf_event)
 
             # Also send to client via WebSocket for potential UI updates
             if self.websocket:
@@ -652,26 +498,14 @@ class VoiceLiveHandler:
     async def _handle_raw_audio_bytes(self, audio_bytes: bytes) -> None:
         """Handle raw audio bytes."""
         try:
-            # Check connection state first
-            if (
-                not self.voice_live_connection
-                or not self.voice_live_connection._connection
-            ):
+            # Check connection state first (LVA only)
+            if not self._lva_agent:
                 logger.warning(
-                    f"Voice Live connection not available for raw audio in session {self.session_id}"
+                    f"LVA agent not available for raw audio in session {self.session_id}"
                 )
                 return
 
-            # Check if connection is already closed
-            if (
-                hasattr(self.voice_live_connection._connection, "closed")
-                and self.voice_live_connection._connection.closed
-            ):
-                logger.info(
-                    f"Voice Live connection already closed for raw audio in session {self.session_id}"
-                )
-                self.is_running = False
-                return
+            # (LVA path) assume connection is valid once agent is present
 
             # DEBUG: Log raw audio details
             logger.debug(
@@ -697,7 +531,7 @@ class VoiceLiveHandler:
             }
 
             try:
-                await self.voice_live_connection.send(json.dumps(audio_event))
+                self._lva_agent.send_event(audio_event)
                 logger.debug(
                     f"[RAW AUDIO SEND] Session {self.session_id}: Successfully sent raw audio to Azure Voice Live"
                 )
@@ -735,81 +569,49 @@ class VoiceLiveHandler:
             logger.error(f"Traceback: {traceback.format_exc()}")
 
     async def _configure_session(self) -> None:
-        """Configure the Azure Voice Live session."""
+        """Session configuration handled by AzureLiveVoiceAgent on connect (no-op)."""
+        logger.debug(
+            f"Session configuration handled by LVA for session {self.session_id}"
+        )
+
+    # Legacy receive loop removed; LVA event loop handles inbound events
+
+    async def _lva_event_loop(self) -> None:
+        """Background task to receive events from AzureLiveVoiceAgent when enabled."""
+        logger.info(f"Starting LVA event loop for session {self.session_id}")
         try:
-            self.system_prompt = (
-                "Greet the user warmly and ask how you can assist them today."
-            )
-            session_config = {
-                "modalities": ["text", "audio"],
-                "instructions": self.system_prompt,
-                "turn_detection": {
-                    "type": "azure_semantic_vad",
-                    "threshold": 0.3,
-                    "prefix_padding_ms": 200,
-                    "silence_duration_ms": 500,
-                    "end_of_utterance_detection": {
-                        "model": "semantic_detection_v1",
-                        "threshold": 0.01,
-                        "timeout": 2,
-                    },
-                },
-                "input_audio_noise_reduction": {"type": "azure_deep_noise_suppression"},
-                "input_audio_echo_cancellation": {"type": "server_echo_cancellation"},
-                "voice": {
-                    "name": "en-US-Ava:DragonHDLatestNeural",
-                    "type": "azure-standard",
-                    "temperature": 0.8,
-                },
-                # Enable transcription to receive transcription.completed events
-                "input_audio_transcription": {"model": "whisper-1"},
-            }
-
-            logger.info(
-                f"Sending session configuration for {self.session_id}: {session_config}"
-            )
-            await self.voice_live_connection.session.update(session=session_config)
-            logger.info(
-                f"Session configuration sent successfully for {self.session_id}"
-            )
-
-        except Exception as e:
-            logger.error(f"Failed to configure session {self.session_id}: {e}")
-            raise
-
-    async def _receive_audio_loop(self) -> None:
-        """Background task to receive audio responses from Azure Voice Live."""
-        logger.info(f"Starting receive audio loop for session {self.session_id}")
-        try:
-            async for raw_event in self.voice_live_connection:
-                if not self.is_running:
-                    logger.info(
-                        f"Receive loop stopping - handler not running for session {self.session_id}"
+            while self.is_running and self._use_lva_agent and self._lva_agent is not None:
+                try:
+                    raw = self._lva_agent.recv_raw(timeout_s=0.05)
+                except Exception as e:
+                    logger.warning(
+                        f"LVA transport receive error for session {self.session_id}: {e}"
                     )
-                    break
+                    raw = None
 
-                logger.debug(
-                    f"Received event from Azure Voice Live for session {self.session_id}: {raw_event[:100]}..."
-                )
+                if not raw:
+                    await asyncio.sleep(0.01)
+                    continue
 
                 try:
-                    event = json.loads(raw_event)
-                    await self._handle_voice_live_event(event)
-                except json.JSONDecodeError as e:
-                    logger.error(f"Failed to decode event: {e}")
-                except Exception as e:
-                    logger.error(f"Error handling voice live event: {e}")
+                    event = json.loads(raw)
+                except Exception:
+                    logger.warning(
+                        f"Failed to parse LVA event JSON for session {self.session_id}"
+                    )
+                    continue
 
-        except WebSocketException as e:
-            logger.error(
-                f"WebSocket error in receive loop for session {self.session_id}: {e}"
-            )
-        except Exception as e:
-            logger.error(
-                f"Error in receive audio loop for session {self.session_id}: {e}"
-            )
+                try:
+                    await self._handle_voice_live_event(event)
+                except Exception as e:
+                    logger.error(
+                        f"Error handling LVA event for session {self.session_id}: {e}"
+                    )
+        except asyncio.CancelledError:
+            logger.info(f"LVA event loop cancelled for session {self.session_id}")
+            raise
         finally:
-            logger.info(f"Receive audio loop ended for session {self.session_id}")
+            logger.info(f"LVA event loop ended for session {self.session_id}")
 
     async def _handle_voice_live_event(self, event: dict) -> None:
         """Handle events from Azure Voice Live API."""
@@ -926,20 +728,17 @@ class VoiceLiveHandler:
                 # Resample audio from 24kHz (Azure Voice Live) to match ACS expected rate
                 resampled_audio = await self._resample_audio_for_acs(audio_delta)
 
-                # Format audio response in ACS-expected format
+                # Format audio response in ACS-expected format (upper-case 'AudioData')
                 acs_audio_message = {
                     "kind": "AudioData",
-                    "audioData": {
-                        "data": resampled_audio,  # Base64 encoded resampled audio data
-                        "silent": False,  # Audio contains actual speech
-                        "timestamp": time.time(),  # Unix timestamp
-                    },
+                    "AudioData": {"data": resampled_audio},
+                    "StopAudio": None,
                 }
 
                 logger.debug(
-                    f"[AUDIO OUT] Session {self.session_id}: Sending resampled audio to client WebSocket"
+                    f"[AUDIO OUT] Session {self.session_id}: Sending resampled audio to ACS WebSocket"
                 )
-                await self.websocket.send_text(json.dumps(acs_audio_message))
+                await self.websocket.send_json(acs_audio_message)
 
         except Exception as e:
             logger.error(
@@ -1123,24 +922,26 @@ class VoiceLiveHandler:
     async def _send_orchestrator_response(self, response_text: str) -> None:
         """Send orchestrator response to Azure Voice Live for text-to-speech conversion."""
         try:
-            if (
-                not self.voice_live_connection
-                or not self.voice_live_connection._connection
-            ):
-                logger.warning(
-                    f"Cannot send orchestrator response - Voice Live connection not available for session {self.session_id}"
-                )
-                return
-
-            # Check if connection is already closed
-            if (
-                hasattr(self.voice_live_connection._connection, "closed")
-                and self.voice_live_connection._connection.closed
-            ):
-                logger.warning(
-                    f"Cannot send orchestrator response - Voice Live connection already closed for session {self.session_id}"
-                )
-                return
+            if self._use_lva_agent and self._lva_agent is not None:
+                pass
+            else:
+                if (
+                    not self.voice_live_connection
+                    or not self.voice_live_connection._connection
+                ):
+                    logger.warning(
+                        f"Cannot send orchestrator response - Voice Live connection not available for session {self.session_id}"
+                    )
+                    return
+                # Check if connection is already closed
+                if (
+                    hasattr(self.voice_live_connection._connection, "closed")
+                    and self.voice_live_connection._connection.closed
+                ):
+                    logger.warning(
+                        f"Cannot send orchestrator response - Voice Live connection already closed for session {self.session_id}"
+                    )
+                    return
 
             # Send response message to Azure Voice Live for TTS
             response_event = {
@@ -1153,7 +954,10 @@ class VoiceLiveHandler:
                 "event_id": str(uuid.uuid4()),
             }
 
-            await self.voice_live_connection.send(json.dumps(response_event))
+            if self._use_lva_agent and self._lva_agent is not None:
+                self._lva_agent.send_event(response_event)
+            else:
+                await self.voice_live_connection.send(json.dumps(response_event))
             logger.info(
                 f"Sent orchestrator response to Azure Voice Live for session {self.session_id}: '{response_text}'"
             )
@@ -1168,7 +972,10 @@ class VoiceLiveHandler:
                 "event_id": str(uuid.uuid4()),
             }
 
-            await self.voice_live_connection.send(json.dumps(generate_event))
+            if self._use_lva_agent and self._lva_agent is not None:
+                self._lva_agent.send_event(generate_event)
+            else:
+                await self.voice_live_connection.send(json.dumps(generate_event))
             logger.info(
                 f"Triggered response generation for orchestrator response in session {self.session_id}"
             )
