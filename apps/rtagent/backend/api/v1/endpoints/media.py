@@ -516,7 +516,36 @@ async def _create_media_handler(
         return handler
 
     elif ACS_STREAMING_MODE == StreamMode.VOICE_LIVE:
-        # TODO: Wire up the orchestrator to voice live
+        # Prefer a pre-initialized Voice Live agent bound at call initiation
+        injected_agent = None
+        voice_live_pool = getattr(websocket.app.state, "voice_live_pool", None)
+        agent_tier = None
+
+        try:
+            call_ctx = await websocket.app.state.conn_manager.pop_call_context(
+                call_connection_id
+            )
+            if call_ctx and call_ctx.get("lva_agent"):
+                injected_agent = call_ctx.get("lva_agent")
+                voice_live_pool = call_ctx.get("pool") or voice_live_pool
+                agent_tier = call_ctx.get("tier")
+                logger.info(
+                    f"Bound pre-initialized Voice Live agent to call {call_connection_id}"
+                    + (f" (tier={agent_tier})" if agent_tier else "")
+                )
+        except Exception as e:
+            logger.debug(f"No pre-initialized Voice Live context found: {e}")
+
+        # Fallback to pool allocation if nothing pre-bound
+        if injected_agent is None and voice_live_pool is not None:
+            try:
+                injected_agent, agent_tier = await voice_live_pool.get_agent()
+                logger.info(
+                    f"Allocated Voice Live agent from pool (tier={agent_tier})"
+                )
+            except Exception as e:
+                logger.warning(f"Voice Live pool allocation failed: {e}")
+
         handler = VoiceLiveHandler(
             azure_endpoint=AZURE_VOICE_LIVE_ENDPOINT,
             model_name=AZURE_VOICE_LIVE_MODEL,
@@ -524,6 +553,8 @@ async def _create_media_handler(
             websocket=websocket,
             orchestrator=orchestrator,
             use_lva_agent=True,
+            lva_agent=injected_agent,
+            voice_live_pool=voice_live_pool if injected_agent else None,
         )
 
         logger.info("Created V1 ACS voice live handler for VOICE_LIVE mode")

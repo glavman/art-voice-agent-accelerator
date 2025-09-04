@@ -68,7 +68,8 @@ class LvaSessionCfg:
     voice_temperature: float = 0.8
     vad_threshold: float = 0.5
     vad_prefix_ms: int = 300
-    vad_silence_ms: int = 1000
+    vad_silence_ms: int = 800
+    vad_eou_timeout_s: float = 2.0
 
 
 class AzureLiveVoiceAgent:
@@ -199,6 +200,12 @@ class AzureLiveVoiceAgent:
                     "threshold": self._session.vad_threshold,
                     "prefix_padding_ms": self._session.vad_prefix_ms,
                     "silence_duration_ms": self._session.vad_silence_ms,
+                    # Align with latest server-side EOU detection model
+                    "end_of_utterance_detection": {
+                        "model": "semantic_detection_v1",
+                        "threshold": self._session.vad_threshold,
+                        "timeout": self._session.vad_eou_timeout_s,
+                    },
                 },
                 
                 # Audio input configuration
@@ -210,7 +217,7 @@ class AzureLiveVoiceAgent:
                     "type": "server_echo_cancellation"
                 },
                 
-                # Audio output configuration  
+                # Audio output configuration
                 "output_audio_format": "pcm16",
                 
                 # Voice configuration

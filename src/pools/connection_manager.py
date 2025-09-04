@@ -198,6 +198,10 @@ class ThreadSafeConnectionManager:
         self._connection_queue: asyncio.Queue = asyncio.Queue(maxsize=queue_size)
         self._rejected_count = 0
 
+        # Out-of-band per-call context (for pre-initialized resources before WS exists)
+        # Example: { call_id: { "lva_agent": <agent>, "pool": <pool>, "session_id": str, ... } }
+        self._call_context: Dict[str, Any] = {}
+
         logger.info(
             f"ConnectionManager initialized: max_connections={max_connections}, "
             f"queue_size={queue_size}, limits_enabled={enable_connection_limits}"
@@ -522,6 +526,22 @@ class ThreadSafeConnectionManager:
         async with self._lock:
             conn = self._conns.get(connection_id)
             return conn.meta if conn else None
+
+    # ---------------------- Call Context (Out-of-band) ---------------------- #
+    async def set_call_context(self, call_id: str, context: Dict[str, Any]) -> None:
+        """Associate arbitrary context with a call_id (thread-safe)."""
+        async with self._lock:
+            self._call_context[call_id] = context
+
+    async def get_call_context(self, call_id: str) -> Optional[Dict[str, Any]]:
+        """Get (without removing) context for a call_id (thread-safe)."""
+        async with self._lock:
+            return self._call_context.get(call_id)
+
+    async def pop_call_context(self, call_id: str) -> Optional[Dict[str, Any]]:
+        """Atomically retrieve and remove context for a call_id (thread-safe)."""
+        async with self._lock:
+            return self._call_context.pop(call_id, None)
 
     async def get_connection_by_call_id(self, call_id: str) -> Optional[str]:
         """Get connection_id by call_id safely."""

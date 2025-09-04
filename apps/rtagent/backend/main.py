@@ -256,15 +256,15 @@ async def lifespan(app: FastAPI):
         else:
             logger.info("AOAI pool disabled, skipping startup initialization")
 
-        if ACS_STREAMING_MODE == StreamMode.VOICE_LIVE:
-            # Initialize Voice Live warm pool (pre-connect agents)
-            span.set_attribute("startup.stage", "voice_live_pool")
-            try:
-                # Use background prewarm to avoid blocking startup time
-                app.state.voice_live_pool = await get_voice_live_pool(background_prewarm=True)
-                logger.info("Voice Live pool initialization scheduled (background prewarm)")
-            except Exception as e:
-                logger.error(f"Voice Live pool initialization failed: {e}")
+        # if ACS_STREAMING_MODE == StreamMode.VOICE_LIVE:
+        #     # Initialize Voice Live warm pool (pre-connect agents)
+        #     span.set_attribute("startup.stage", "voice_live_pool")
+        #     try:
+        #         # Use background prewarm to avoid blocking startup time
+        #         app.state.voice_live_pool = await get_voice_live_pool(background_prewarm=True)
+        #         logger.info("Voice Live pool initialization scheduled (background prewarm)")
+        #     except Exception as e:
+        #         logger.error(f"Voice Live pool initialization failed: {e}")
 
         # ------------------------ Other singletons ---------------------------
         span.set_attribute("startup.stage", "cosmos_db")

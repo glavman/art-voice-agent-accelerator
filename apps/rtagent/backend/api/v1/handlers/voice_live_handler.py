@@ -95,6 +95,8 @@ class VoiceLiveHandler:
         *,
         agent_yaml: Optional[str] = None,
         use_lva_agent: bool = True,
+        lva_agent: Optional[AzureLiveVoiceAgent] = None,
+        voice_live_pool: Optional[object] = None,
     ):
         self.session_id = session_id
         self.websocket = websocket
@@ -106,7 +108,8 @@ class VoiceLiveHandler:
         self.voice_live_client = None
         self.voice_live_connection = None
         # Optional Azure Live Voice Agent (shared implementation)
-        self._lva_agent: Optional[AzureLiveVoiceAgent] = None
+        self._lva_agent: Optional[AzureLiveVoiceAgent] = lva_agent
+        self._voice_live_pool = voice_live_pool
         self._lva_yaml: str = (
             agent_yaml
             or "apps/rtagent/backend/src/agents/Lvagent/agent_store/auth_agent.yaml"
@@ -135,14 +138,23 @@ class VoiceLiveHandler:
             logger.info(f"Starting voice live handler for session {self.session_id}")
             # Optionally also connect the shared Azure Live Voice Agent for testing
             try:
-                self._lva_agent = build_lva_from_yaml(self._lva_yaml, enable_audio_io=False)
-                # Connect in a worker thread to avoid blocking the loop
-                await asyncio.to_thread(self._lva_agent.connect)
-                logger.info(
-                    "LVA agent connected | url=%s | auth=%s",
-                    getattr(self._lva_agent, "url", "(hidden)"),
-                    getattr(self._lva_agent, "auth_method", "unknown"),
-                )
+                if not self._lva_agent:
+                    self._lva_agent = build_lva_from_yaml(
+                        self._lva_yaml, enable_audio_io=False
+                    )
+                    # Connect in a worker thread to avoid blocking the loop
+                    await asyncio.to_thread(self._lva_agent.connect)
+                    logger.info(
+                        "LVA agent connected | url=%s | auth=%s",
+                        getattr(self._lva_agent, "url", "(hidden)"),
+                        getattr(self._lva_agent, "auth_method", "unknown"),
+                    )
+                else:
+                    logger.info(
+                        "Using injected LVA agent | url=%s | auth=%s",
+                        getattr(self._lva_agent, "url", "(hidden)"),
+                        getattr(self._lva_agent, "auth_method", "unknown"),
+                    )
             except Exception as e:
                 logger.error("Failed to connect LVA agent: %s", e)
                 raise
@@ -191,10 +203,20 @@ class VoiceLiveHandler:
                 except asyncio.CancelledError:
                     pass
 
-            # Close optional LVA agent if used
+            # Close or release optional LVA agent if used
             if self._lva_agent:
                 try:
-                    await asyncio.to_thread(self._lva_agent.close)
+                    if self._voice_live_pool:
+                        try:
+                            await self._voice_live_pool.release_agent(self._lva_agent)
+                            logger.info("Released LVA agent back to pool")
+                        except Exception as e:
+                            logger.warning(
+                                f"Pool release failed, closing agent: {e}"
+                            )
+                            await asyncio.to_thread(self._lva_agent.close)
+                    else:
+                        await asyncio.to_thread(self._lva_agent.close)
                 except Exception:
                     pass
                 self._lva_agent = None
