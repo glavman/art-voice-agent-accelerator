@@ -40,8 +40,12 @@ from opentelemetry import trace
 from src.pools.async_pool import AsyncPool
 from src.pools.connection_manager import ThreadSafeConnectionManager
 from src.pools.session_metrics import ThreadSafeSessionMetrics
+from src.pools.voice_live_pool import get_voice_live_pool
+from src.enums.stream_modes import StreamMode
 
 # Import clean application configuration
+from src.enums import StreamMode
+from config import ACS_STREAMING_MODE
 from config.app_config import AppConfig
 from config.app_settings import (
     AGENT_AUTH_CONFIG,
@@ -251,6 +255,16 @@ async def lifespan(app: FastAPI):
                 logger.warning("AOAI pool initialization returned None")
         else:
             logger.info("AOAI pool disabled, skipping startup initialization")
+
+        if ACS_STREAMING_MODE == StreamMode.VOICE_LIVE:
+            # Initialize Voice Live warm pool (pre-connect agents)
+            span.set_attribute("startup.stage", "voice_live_pool")
+            try:
+                # Use background prewarm to avoid blocking startup time
+                app.state.voice_live_pool = await get_voice_live_pool(background_prewarm=True)
+                logger.info("Voice Live pool initialization scheduled (background prewarm)")
+            except Exception as e:
+                logger.error(f"Voice Live pool initialization failed: {e}")
 
         # ------------------------ Other singletons ---------------------------
         span.set_attribute("startup.stage", "cosmos_db")
