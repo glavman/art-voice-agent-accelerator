@@ -20,7 +20,6 @@ output "AZURE_LOCATION" {
 output "AZURE_OPENAI_ENDPOINT" {
   description = "Azure OpenAI endpoint"
   value       = module.ai_foundry.openai_endpoint
-  # value       = azurerm_cognitive_account.openai.endpoint
 }
 
 output "AZURE_OPENAI_CHAT_DEPLOYMENT_ID" {
