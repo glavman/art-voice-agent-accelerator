@@ -195,22 +195,24 @@ jobs:
         continue-on-error: true  # Don't fail if authentication doesn't work
         id: azd-login
         run: |
-          if [ "${{ env.USE_OIDC }}" = "true" ] && [ "${{ steps.azure-login-oidc.outcome }}" = "success" ]; then
-            echo "🔐 Attempting azd authentication with OIDC..."
+          if ($env:USE_OIDC -eq "true" -and "${{ steps.azure-login-oidc.outcome }}" -eq "success") {
+            Write-Host "🔐 Attempting azd authentication with OIDC..."
             azd auth login `
-              --client-id "$Env:AZURE_CLIENT_ID" `
-              --federated-credential-provider "github" `
-              --tenant-id "$Env:AZURE_TENANT_ID"
-          elif [ "${{ env.USE_OIDC }}" = "false" ] && [ "${{ steps.azure-login-sp.outcome }}" = "success" ]; then
-            echo "🔐 Attempting azd authentication with Service Principal..."
+              --client-id $env:AZURE_CLIENT_ID `
+              --federated-credential-provider github `
+              --tenant-id $env:AZURE_TENANT_ID
+          }
+          elseif ($env:USE_OIDC -eq "false" -and "${{ steps.azure-login-sp.outcome }}" -eq "success") {
+            Write-Host "🔐 Attempting azd authentication with Service Principal..."
             azd auth login `
-              --client-id "$Env:AZURE_CLIENT_ID" `
-              --client-secret "$Env:AZURE_CLIENT_SECRET" `
-              --tenant-id "$Env:AZURE_TENANT_ID"
-          else
-            echo "⚠️ Skipping azd login due to failed Azure authentication"
+              --client-id $env:AZURE_CLIENT_ID `
+              --client-secret $env:AZURE_CLIENT_SECRET `
+              --tenant-id $env:AZURE_TENANT_ID
+          }
+          else {
+            Write-Host "⚠️ Skipping azd login due to failed Azure authentication"
             exit 1
-          fi
+          }
         shell: pwsh
 
       # ========================================================================
