@@ -19,7 +19,8 @@ output "AZURE_LOCATION" {
 # AI Services
 output "AZURE_OPENAI_ENDPOINT" {
   description = "Azure OpenAI endpoint"
-  value       = azurerm_cognitive_account.openai.endpoint
+  value       = module.ai_foundry.openai_endpoint
+  # value       = azurerm_cognitive_account.openai.endpoint
 }
 
 output "AZURE_OPENAI_CHAT_DEPLOYMENT_ID" {
@@ -32,29 +33,19 @@ output "AZURE_OPENAI_API_VERSION" {
   value       = "2025-01-01-preview"
 }
 
-output "AZURE_OPENAI_RESOURCE_ID" {
-  description = "Azure OpenAI resource ID"
-  value       = azurerm_cognitive_account.openai.id
-}
-
 output "AZURE_SPEECH_ENDPOINT" {
   description = "Azure Speech Services endpoint"
-  value       = azurerm_cognitive_account.speech.endpoint
+  value       = module.ai_foundry.endpoint
 }
 
 output "AZURE_SPEECH_RESOURCE_ID" {
   description = "Azure Speech Services resource ID"
-  value       = azurerm_cognitive_account.speech.id
+  value       = module.ai_foundry.account_id
 }
 
 output "AZURE_SPEECH_REGION" {
-  description = "Azure Speech Services region"
-  value       = azurerm_cognitive_account.speech.location
-}
-
-output "AZURE_SPEECH_DOMAIN_ENDPOINT" {
-  description = "Azure Speech Services domain endpoint for ACS integration"
-  value       = "https://${azurerm_cognitive_account.speech.custom_subdomain_name}.cognitiveservices.azure.com/"
+  description = "Azure Speech Services location"
+  value       = module.ai_foundry.location
 }
 
 # Communication Services
