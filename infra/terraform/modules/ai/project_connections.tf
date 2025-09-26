@@ -9,17 +9,17 @@ resource "time_sleep" "wait_project_identities" {
 }
 ## Create AI Foundry project connections (only if id and endpoint vars are provided)
 locals {
-  cosmos_name_from_id = ((var.cosmosdb_account_id != null && var.cosmosdb_account_id != "") 
-    ? try(element(split("/", var.cosmosdb_account_id), length(split("/", var.cosmosdb_account_id)) - 1), "") 
-    : "")
+  cosmos_name_from_id = ((var.cosmosdb_account_id != null && var.cosmosdb_account_id != "")
+    ? try(element(split("/", var.cosmosdb_account_id), length(split("/", var.cosmosdb_account_id)) - 1), "")
+  : "")
 
-  storage_name_from_id = ((var.storage_account_id != null && var.storage_account_id != "") 
-    ? try(element(split("/", var.storage_account_id), length(split("/", var.storage_account_id)) - 1), "") 
-    : "")
+  storage_name_from_id = ((var.storage_account_id != null && var.storage_account_id != "")
+    ? try(element(split("/", var.storage_account_id), length(split("/", var.storage_account_id)) - 1), "")
+  : "")
 
-  aisearch_name_from_id = ((var.ai_search_id != null && var.ai_search_id != "") 
-    ? try(element(split("/", var.ai_search_id), length(split("/", var.ai_search_id)) - 1), "") 
-    : "")
+  aisearch_name_from_id = ((var.ai_search_id != null && var.ai_search_id != "")
+    ? try(element(split("/", var.ai_search_id), length(split("/", var.ai_search_id)) - 1), "")
+  : "")
 }
 
 resource "azapi_resource" "conn_cosmosdb" {

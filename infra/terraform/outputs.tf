@@ -206,3 +206,24 @@ output "REDIS_SKU_OPTIMIZED" {
   description = "Redis Enterprise SKU for optimal performance"
   value       = var.redis_sku
 }
+
+
+output "ai_foundry_account_id" {
+  description = "Resource ID of the AI Foundry account"
+  value       = module.ai_foundry.account_id
+}
+
+output "ai_foundry_account_endpoint" {
+  description = "Endpoint URI for the AI Foundry account"
+  value       = module.ai_foundry.endpoint
+}
+
+output "ai_foundry_project_id" {
+  description = "Resource ID of the AI Foundry project"
+  value       = module.ai_foundry.project_id
+}
+
+output "ai_foundry_project_identity_principal_id" {
+  description = "Managed identity principal ID assigned to the AI Foundry project"
+  value       = module.ai_foundry.project_identity_principal_id
+}

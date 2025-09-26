@@ -312,7 +312,7 @@ resource "azurerm_container_app" "backend" {
         value = module.ai_foundry.openai_endpoint
         # value = "https://${azurerm_cognitive_account.speech.custom_subdomain_name}.cognitiveservices.azure.com/"
       }
-  
+
       env {
         name  = "AZURE_SPEECH_RESOURCE_ID"
         value = module.ai_foundry.account_id

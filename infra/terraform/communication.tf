@@ -185,12 +185,12 @@ resource "azurerm_monitor_diagnostic_setting" "acs_diagnostics" {
 # ============================================================================
 
 resource "azurerm_eventgrid_system_topic" "acs" {
-  name                   = "eg-topic-acs-${local.resource_token}"
-  resource_group_name    = azurerm_resource_group.main.name
-  location               = "global"
-  source_resource_id = azapi_resource.acs.id
-  topic_type             = "Microsoft.Communication.CommunicationServices"
-  tags                   = local.tags
+  name                = "eg-topic-acs-${local.resource_token}"
+  resource_group_name = azurerm_resource_group.main.name
+  location            = "global"
+  source_resource_id  = azapi_resource.acs.id
+  topic_type          = "Microsoft.Communication.CommunicationServices"
+  tags                = local.tags
 }
 
 # # Event Grid System Topic Event Subscription for Incoming Calls

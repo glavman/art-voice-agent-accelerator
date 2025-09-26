@@ -16,7 +16,7 @@ locals {
 }
 
 data "azurerm_resource_group" "rg" {
-    name  = var.resource_group_name
+  name = var.resource_group_name
 }
 
 resource "azapi_resource" "ai_foundry_account" {
