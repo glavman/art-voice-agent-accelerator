@@ -78,11 +78,7 @@ jobs:
     runs-on: ubuntu-latest
     
     # Try to request OIDC permissions, fall back gracefully if denied
-    permissions:
-      contents: read
-      id-token: write  # Will be denied if not available, that's ok
-      pull-requests: write  # Will be denied if not available, that's ok
-    
+
     # Environment selection logic
     environment: >-
       ${{
