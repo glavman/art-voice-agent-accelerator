@@ -176,7 +176,7 @@ disable_local_auth = true
 redis_sku = "MemoryOptimized_M10"
 
 # OpenAI model deployments with latest models
-openai_models = [
+model_deployments = [
   {
     name     = "gpt-4-1-mini"
     version  = "2024-11-20"
@@ -615,7 +615,7 @@ container_apps_configuration = {
 Customize OpenAI model deployments for the latest supported models:
 
 ```hcl
-openai_models = [
+model_deployments = [
   {
     name     = "gpt-4-1-mini"
     version  = "2024-11-20"

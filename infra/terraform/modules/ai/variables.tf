@@ -90,9 +90,9 @@ variable "log_analytics_workspace_id" {
 }
 
 variable "account_principal_ids" {
-  description = "Principal IDs to assign Cognitive Services access to the AI Foundry account."
-  type        = list(string)
-  default     = []
+  description = "Map of principals to assign Cognitive Services access to the AI Foundry account (keys should be stable labels)."
+  type        = map(string)
+  default     = {}
 }
 
 variable "account_principal_role_definition_name" {
