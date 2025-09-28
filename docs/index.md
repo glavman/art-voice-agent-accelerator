@@ -1,69 +1,56 @@
-# Real-Time Voice Agent
+# Real-Time Voice Agent Documentation Hub
 
-A production-ready Azure-powered voice agent with advanced text-to-speech and speech recognition capabilities.
+This site brings together everything you need to deploy, operate, and extend the Azure-based Real-Time Voice Agent. Use the map below to jump into the areas most relevant to your work.
 
-## 🚀 Features
+## Documentation Map
 
-- **Real-time speech synthesis** with Azure Cognitive Services
-- **Streaming speech recognition** with advanced language detection
-- **Multi-language support** with automatic optimization
-- **Neural voice synthesis** with customizable styles and prosody
-- **OpenTelemetry observability** with distributed tracing
-- **Production-ready** with comprehensive error handling and monitoring
+- **Quick Start & Setup**
+  - [Quick Start Guide](getting-started/quickstart.md)
+  - [Local Development Playbook](quickstart-local-development.md)
+  - [Installation Checklist](getting-started/installation.md)
+- **Architecture & Flows**
+  - [Architecture Deep Dive](Architecture.md)
+  - [Data Architecture](DataArchitecture.md)
+  - [Integration Points](IntegrationPoints.md)
+  - [ACS Barge-In Flow](ACSBargeInFlow.md)
+- **Operations & Delivery**
+  - [Deployment Guide](DeploymentGuide.md)
+  - [CI/CD Runbook](CICDGuide.md)
+  - [Path to Production](PathToProduction.md)
+  - [Application Insights](ApplicationInsights.md)
+- **Security & Access**
+  - [Auth for HTTP and WebSocket Calls](AuthForHTTPandWSS.md)
+  - [WebSocket Authentication](WebsocketAuth.md)
+- **Testing & Load**
+  - [Load Testing Strategy](LoadTesting.md)
+  - [Troubleshooting Guide](Troubleshooting.md)
+- **Industry Scenarios**
+  - [Healthcare Playbooks](HealthcareUsecases.md)
 
-## 🏗️ Architecture
+## Diagram Highlights
 
-The voice agent is built with a modular architecture optimized for low-latency real-time applications:
+- Production reference: [Architecture Deep Dive – Production Deployment](Architecture.md#production-deployment-architecture) (image: `assets/RTAudio.v0.png`)
+- Data lifecycle: [Data Architecture – Event Pipeline](DataArchitecture.md#event-driven-data-pipeline) with interactive Mermaid sequence diagrams
+- Contact center routing: [ACS Barge-In Flow](ACSBargeInFlow.md) featuring step-by-step diagrams and Mermaid flows
+- Authentication flows: [Auth for HTTP and WSS](AuthForHTTPandWSS.md#end-to-end-authentication-flow) detailing OAuth and shared access tokens
 
-- **FastAPI backend** for high-performance async operations
-- **Azure Communication Services** for call automation and media streaming
-- **Azure Speech Services** for TTS/STT with neural voice models
-- **Azure OpenAI** for intelligent conversation handling
-- **OpenTelemetry** for comprehensive observability and monitoring
+## Architecture at a Glance
 
-## 🎯 Key Components
+```mermaid
+flowchart LR
+    Caller[Caller / Client] --> ACS[Azure Communication Services]
+    ACS --> Speech[Azure Speech Services]
+    Speech --> FastAPI[FastAPI Real-Time Agent]
+    FastAPI -->|Intent & Context| LLM[Azure OpenAI / GPT-4o]
+    FastAPI --> Redis[(Redis Session State)]
+    FastAPI --> Monitoring[Azure Monitor & App Insights]
+    FastAPI --> Downstream[External Integrations]
+    classDef azure fill:#1c75bc,stroke:#0f3c62,color:#fff;
+    class ACS,Speech azure;
+```
 
-### SpeechSynthesizer
+The architecture section contains comprehensive Mermaid diagrams for every critical workflow. When rendered on GitHub Pages, these charts remain interactive—hover to highlight paths or copy the diagram source to integrate into your own documentation.
 
-The core text-to-speech engine providing:
+## Next Steps
 
-- Multiple synthesis modes (speaker playback, memory synthesis, frame-based streaming)
-- Flexible authentication (API key, managed identity, credential chains)
-- Intelligent environment detection for headless deployments
-- Advanced SSML support with style and prosody control
-- Real-time frame generation for streaming applications
-
-### StreamingSpeechRecognizer
-
-Advanced speech-to-text engine featuring:
-
-- Real-time streaming recognition with minimal latency
-- Language detection and speaker diarization
-- Neural audio processing for improved accuracy
-- Comprehensive callback system for real-time processing
-- Session management with proper resource cleanup
-
-## 📊 Observability
-
-Built-in observability features include:
-
-- **Distributed tracing** with OpenTelemetry and Azure Monitor
-- **Structured logging** with correlation IDs for request tracking
-- **Performance metrics** for latency and error rate monitoring
-- **Service dependency mapping** for application insights
-- **Real-time monitoring** dashboards and alerting
-
-## 🔧 Configuration
-
-The system supports flexible configuration through:
-
-- Environment variables for credentials and settings
-- Runtime configuration for voice parameters and behavior
-- Deployment-specific settings for different environments
-- Automatic fallback mechanisms for robust operation
-
-## 🌟 Getting Started
-
-Ready to build your voice application? Check out our [Quick Start Guide](getting-started/quickstart.md) to get up and running in minutes.
-
-For detailed API documentation, explore our [API Reference](api/overview.md) section.
+If you are new to the project, start with the [Quick Start Guide](getting-started/quickstart.md) and then dive into the [Architecture Deep Dive](Architecture.md) for system context. Platform operators should review the [Deployment Guide](DeploymentGuide.md) and [Troubleshooting](Troubleshooting.md) playbooks, while solution teams can jump into the [Integration Points](IntegrationPoints.md) and [Healthcare Playbooks](HealthcareUsecases.md) for domain-specific patterns.

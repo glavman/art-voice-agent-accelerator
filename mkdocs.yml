@@ -51,22 +51,31 @@ plugins:
 nav:
   - Home: index.md
   - Getting Started:
-    - Installation: getting-started/installation.md
-    - Quick Start: getting-started/quickstart.md
-    - Configuration: getting-started/configuration.md
+    - Quick Start Guide: getting-started/quickstart.md
+    - Local Development Playbook: quickstart-local-development.md
+    - Installation Checklist: getting-started/installation.md
+    - Repository Tour: repo-structure.md
+  - Architecture & Flows:
+    - Architecture Deep Dive: Architecture.md
+    - Data Architecture: DataArchitecture.md
+    - Integration Points: IntegrationPoints.md
+    - ACS Barge-In Flow: ACSBargeInFlow.md
+  - Security & Access:
+    - Auth for HTTP and WSS: AuthForHTTPandWSS.md
+    - WebSocket Authentication: WebsocketAuth.md
+  - Operations & Delivery:
+    - Deployment Guide: DeploymentGuide.md
+    - Path to Production: PathToProduction.md
+    - CI/CD Runbook: CICDGuide.md
+    - Application Insights: ApplicationInsights.md
+    - Troubleshooting Handbook: Troubleshooting.md
+  - Testing & Load:
+    - Load Testing Strategy: LoadTesting.md
+  - Industry Solutions:
+    - Healthcare Playbooks: HealthcareUsecases.md
   - API Reference:
     - Overview: api/overview.md
     - Speech Synthesis: api/speech-synthesis.md
-    - Speech Recognition: api/speech-recognition.md
-    - Utilities: api/utilities.md
-  - Architecture:
-    - Overview: architecture/overview.md
-    - Azure Integration: architecture/azure-integration.md
-    - Observability: architecture/observability.md
-  - Examples:
-    - Basic Usage: examples/basic-usage.md
-    - Advanced Scenarios: examples/advanced-scenarios.md
-    - Production Deployment: examples/production.md
 
 markdown_extensions:
   - pymdownx.highlight:
