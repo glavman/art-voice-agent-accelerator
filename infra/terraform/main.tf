@@ -72,7 +72,7 @@ locals {
   tags = {
     "azd-env-name"    = var.environment_name
     "hidden-title"    = "Real Time Audio ${var.environment_name}"
-    "project"         = "gbb-ai-audio-agent"
+    "project"         = "art-voice-agent-accelerator"
     "environment"     = var.environment_name
     "deployment"      = "terraform"
     "deployed_by"     = coalesce(var.deployed_by, local.principal_id)
