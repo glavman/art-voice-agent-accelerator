@@ -82,16 +82,6 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install documentation dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements-docs.txt
-
-      - name: Install minimal project dependencies
-        run: |
-          pip install fastapi pydantic uvicorn starlette
-        continue-on-error: true
-
       - name: Deploy docs
         uses: mhausenblas/mkdocs-deploy-gh-pages@master
         # Or use mhausenblas/mkdocs-deploy-gh-pages@nomaterial to build without the mkdocs-material theme
