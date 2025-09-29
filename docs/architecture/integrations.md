@@ -1,44 +1,92 @@
-# Integration Points: Adopting FastAPI Azure Voice Backend with AWS
+# :material-link: Cross-Cloud Integration Patterns
 
-> **Disclaimer:** The service mappings, API flows, and integration patterns in this document are based on current AWS and Azure documentation as of June 2025. Actual compatibility and performance characteristics may vary. These integrations should be validated in a proof-of-concept environment and reviewed against the latest provider documentation for updates or breaking changes.
+!!! abstract "Azure & AWS Integration Guide"
+    Comprehensive integration patterns for **Real-Time Voice Agent deployment** across Azure and AWS cloud platforms, providing service equivalencies, data flows, and implementation strategies for enterprise multi-cloud scenarios.
 
-## Table of Contents
+!!! warning "Compatibility Disclaimer"
+    Service mappings and integration patterns are based on current AWS and Azure documentation. Actual compatibility and performance may vary. Validate all integrations in a proof-of-concept environment before production deployment.
 
-1. [Overview](#1-overview)
-2. [Integration Scenarios](#2-integration-scenarios)
-    - [2.1 AWS Connect with Azure Voice Backend](#21-aws-connect-with-azure-voice-backend)
-    - [2.2 AWS Connect to Azure Communication Services](#22-aws-connect-to-azure-communication-services)
-    - [2.3 Cross-Cloud General Considerations](#23-cross-cloud-general-considerations)
-3. [Service Mapping & Interchangeability](#3-service-mapping-interchangeability)
-4. [LLM Integration Patterns](#4-llm-integration-patterns)
-5. [Validation & Testing](#5-validation-testing)
+## :material-cloud-sync: Integration Scenarios Overview
 
----
+=== "🔗 AWS Connect + Azure Backend"
+    **Enterprise contact center** using AWS Connect with Azure's advanced voice AI backend
+    
+    - Leverage AWS telephony infrastructure
+    - Utilize Azure's superior speech and AI services
+    - Maintain existing AWS Connect workflows
+    - Reduce latency with strategic placement
 
-## 1. Overview
+=== "📞 AWS Connect ↔ Azure Communication Services"
+    **Bi-directional integration** between AWS Connect and Azure Communication Services
+    
+    - Cross-cloud call routing and transfer
+    - Unified communication experiences
+    - Best-of-breed service selection
+    - Multi-region redundancy
 
-# Cross-Cloud Integrations: Azure & AWS
+=== "🌐 General Cross-Cloud Patterns"
+    **Universal integration considerations** for any multi-cloud deployment
+    
+    - Network latency optimization
+    - Security and compliance alignment
+    - Data residency requirements
+    - Cost optimization strategies
 
-This document outlines comprehensive integration patterns for Real-Time Voice Agent deployment across Azure and AWS cloud platforms, providing service equivalencies, data flows, and implementation strategies.
+!!! info "Microsoft Learn Resources"
+    - **[Unified Hybrid and Multicloud Operations](https://learn.microsoft.com/en-us/azure/cloud-adoption-framework/scenarios/hybrid/strategy)** - Azure as central control plane for multi-cloud environments
+    - **[Connectivity to Other Cloud Providers](https://learn.microsoft.com/en-us/azure/cloud-adoption-framework/ready/azure-best-practices/connectivity-to-other-providers)** - Cross-cloud networking and integration patterns
+    - **[Azure for AWS Professionals](https://learn.microsoft.com/en-us/azure/architecture/aws-professional/)** - Service mapping between Azure and AWS platforms
 
-> **📚 Microsoft Learn Resources:**
-> - [Unified Hybrid and Multicloud Operations](https://learn.microsoft.com/en-us/azure/cloud-adoption-framework/scenarios/hybrid/strategy) - Azure as central control plane for multi-cloud environments
-> - [Connectivity to Other Cloud Providers](https://learn.microsoft.com/en-us/azure/cloud-adoption-framework/ready/azure-best-practices/connectivity-to-other-providers) - Cross-cloud networking and integration patterns
-> - [Azure for AWS Professionals](https://learn.microsoft.com/en-us/azure/architecture/aws-professional/) - Service mapping between Azure and AWS platforms
+## :material-aws: AWS Connect with Azure Voice Backend
 
----
+!!! example "Use Case: Enterprise Contact Center Enhancement"
+    Enterprise uses **AWS Connect** for contact center telephony and wants to leverage **Azure's real-time voice agent backend** for advanced speech, transcription, and LLM-powered workflows.
 
-## 2. Integration Scenarios
+### :material-api: Integration Architecture
 
-### 2.1 AWS Connect with Azure Voice Backend
+```mermaid
+graph TB
+    subgraph AWS["🟠 AWS Cloud"]
+        Connect[AWS Connect<br/>Contact Center]
+        APIGateway[AWS API Gateway<br/>Security Layer]
+        Lambda[AWS Lambda<br/>Integration Logic]
+    end
+    
+    subgraph Azure["🔵 Azure Cloud"]
+        APIM[Azure API Management<br/>FastAPI Proxy]
+        VoiceAgent[Voice Agent Backend<br/>FastAPI + ACS]
+        Speech[Azure Speech Services<br/>STT/TTS]
+        OpenAI[Azure OpenAI<br/>LLM Processing]
+    end
+    
+    Connect --> APIGateway
+    APIGateway --> Lambda
+    Lambda -.->|HTTPS/WebSocket| APIM
+    APIM --> VoiceAgent
+    VoiceAgent --> Speech
+    VoiceAgent --> OpenAI
+    
+    classDef aws fill:#ff9900,stroke:#ff6600,color:#fff
+    classDef azure fill:#0078d4,stroke:#005a9f,color:#fff
+    
+    class Connect,APIGateway,Lambda aws
+    class APIM,VoiceAgent,Speech,OpenAI azure
+```
 
-**Scenario:** Enterprise uses AWS Connect for contact center telephony and wants to leverage Azure's real-time voice agent backend for advanced speech, transcription, or LLM-powered workflows.
+### :material-connection: Integration Points
 
-**Integration Points:**
+| :material-layers: Layer | :material-aws: AWS Component | :material-microsoft-azure: Azure Component | :material-arrow-right: Integration Method |
+|---------|---------------|-----------------|-------------------|
+| **API Gateway** | AWS API Gateway | Azure API Management | HTTPS REST API + WebSocket |
+| **Security** | AWS IAM Roles + JWT | Azure AD + Managed Identity | OAuth2.0 + Cross-cloud federation |
+| **Compute** | AWS Lambda Functions | Azure Container Apps | Event-driven serverless integration |
+| **Networking** | VPC + Transit Gateway | VNet + Virtual WAN | Site-to-Site VPN or ExpressRoute |
 
-- **API Gateway:**
-    - Expose FastAPI endpoints (e.g., `/api/call`, `/call/stream`) via public API Gateway (AWS API Gateway or Azure API Management)
-    - Secure endpoints with OAuth2/JWT or AWS IAM roles
+!!! tip "Security Best Practices"
+    - **Mutual TLS (mTLS)** for service-to-service communication
+    - **JWT tokens** with short expiration times
+    - **API rate limiting** and throttling on both sides
+    - **Network-level security** with VPN or private connectivity
 
 - **AWS Lambda / Step Functions:**
     - Use Lambda functions to invoke FastAPI endpoints for call events, transcription, or agent actions
@@ -100,7 +148,7 @@ flowchart TB
 
      %% Session Border Controller
      subgraph SBCCloud ["🔐 Session Border Controller"]
-          SBC["🛡️ Certified SBC<br/><small>Chime Voice Connector +<br/>ACS Direct Routing</small>"]
+          SBC["🛡️ Compliant SBC<br/><small>Chime Voice Connector +<br/>ACS Direct Routing</small>"]
      end
 
      %% Azure Services
@@ -218,7 +266,7 @@ The integration demonstrates a sophisticated call routing mechanism that seamles
 #### 2.2.3 Key Integration Steps
 
 **🔧 Infrastructure Setup**
-1. Deploy certified SBC for both Amazon Chime Voice Connector and ACS Direct Routing
+1. Deploy compliant SBC for both Amazon Chime Voice Connector and ACS Direct Routing
 2. Configure AWS Connect External Voice Transfer Connector
 3. Register ACS Direct Routing with the SBC
 

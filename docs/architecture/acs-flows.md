@@ -1,29 +1,36 @@
-# ACS Media Handler - Three-Thread Architecture
+# :material-phone-in-talk: ACS Call Automation & Media Flows
 
-# ACS Media Flows: Three-Thread Architecture
+!!! abstract "Three-Thread Voice Processing Architecture"
+    Comprehensive architecture for Azure Communication Services (ACS) media handling, specifically designed for **real-time voice processing** with integrated **barge-in detection** capabilities.
 
-This document describes the comprehensive three-thread architecture for Azure Communication Services (ACS) media handling, specifically designed for real-time voice processing with integrated barge-in detection capabilities.
+## :material-microsoft-azure: Azure Communication Services Integration
 
-> **📚 Microsoft Learn Resources:**
-> - [Audio Streaming Quickstart](https://learn.microsoft.com/en-us/azure/communication-services/how-tos/call-automation/audio-streaming-quickstart) - Server-side audio streaming implementation
-> - [Call Automation SDK](https://learn.microsoft.com/en-us/azure/communication-services/quickstarts/call-automation/callflows-for-customer-interactions) - Automated call routing solutions
-> - [Media Access Overview](https://learn.microsoft.com/en-us/azure/communication-services/concepts/voice-video-calling/media-access) - Real-time media stream processing patterns
+!!! success "Enterprise Voice Processing"
+    Azure Speech SDK provides continuous speech recognition optimized for real-time conversations with sub-10ms barge-in detection.
 
-## Azure Communication Services Integration
+### :material-microphone: Speech Recognition Capabilities
 
-**Azure Speech SDK** provides continuous speech recognition with:
-- **Real-time Processing**: Immediate partial and final result processing
-- **Low-latency Recognition**: Sub-10ms barge-in detection capabilities  
-- **Multiple Result Types**: Partial results for immediate response, final results for accuracy
-- **Session Management**: Automatic session handling with connection recovery
+| :material-feature-search: Feature | :material-information: Description | :material-speedometer: Accelerator Focus |
+|------------|-------------|-------------|
+| **Real-time Processing** | Immediate partial and final result processing | Low-latency patterns |
+| **Barge-in Detection** | Advanced voice activity detection for interruptions | Reference implementation |
+| **Multiple Result Types** | Partial results for speed, final results for accuracy | Flexible processing modes |
+| **Session Management** | Automatic session handling with connection recovery | Robust connection patterns |
+| **Continuous Recognition** | Persistent speech-to-text processing | 24/7 operation templates |
 
-> **📚 Microsoft Learn Resources:**
-> - [What is Speech to Text?](https://learn.microsoft.com/en-us/azure/ai-services/speech-service/speech-to-text) - Real-time speech recognition capabilities
-> - [Real-time Speech Recognition](https://learn.microsoft.com/en-us/azure/ai-services/speech-service/get-started-speech-to-text) - Implementation patterns for continuous STT processing
+!!! info "Microsoft Learn Resources"
+    - **[Audio Streaming Quickstart](https://learn.microsoft.com/en-us/azure/communication-services/how-tos/call-automation/audio-streaming-quickstart)** - Server-side audio streaming implementation
+    - **[Call Automation SDK](https://learn.microsoft.com/en-us/azure/communication-services/quickstarts/call-automation/callflows-for-customer-interactions)** - Automated call routing solutions
+    - **[Media Access Overview](https://learn.microsoft.com/en-us/azure/communication-services/concepts/voice-video-calling/media-access)** - Real-time media stream processing patterns
+    - **[Speech to Text Service](https://learn.microsoft.com/en-us/azure/ai-services/speech-service/speech-to-text)** - Real-time speech recognition capabilities
+    - **[Real-time Speech Recognition](https://learn.microsoft.com/en-us/azure/ai-services/speech-service/get-started-speech-to-text)** - Implementation patterns for continuous STT processing
+    - **[Bidirectional Audio Streaming](https://learn.microsoft.com/en-us/azure/communication-services/concepts/call-automation/audio-streaming-concept)** - Two-way media streaming architecture
+    - **[WebSocket Audio Processing](https://learn.microsoft.com/en-us/azure/communication-services/how-tos/call-automation/audio-streaming-quickstart#handling-audio-streams-in-your-websocket-server)** - Real-time audio stream handling patterns
 
-> **📚 Microsoft Learn Resources:**
-> - [Bidirectional Audio Streaming](https://learn.microsoft.com/en-us/azure/communication-services/concepts/call-automation/audio-streaming-concept) - Two-way media streaming architecture
-> - [WebSocket Audio Processing](https://learn.microsoft.com/en-us/azure/communication-services/how-tos/call-automation/audio-streaming-quickstart#handling-audio-streams-in-your-websocket-server) - Real-time audio stream handling patterns
+## :material-sitemap: Three-Thread Processing Architecture
+
+!!! tip "Thread Separation Strategy"
+    The architecture separates concerns across three dedicated threads for optimal performance and reliability.
 
 ```mermaid
 graph TB

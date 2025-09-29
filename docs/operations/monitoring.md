@@ -5,6 +5,7 @@ This guide explains how to configure and troubleshoot Azure Application Insights
 ## Overview
 
 The application uses Azure Monitor OpenTelemetry to send telemetry data to Application Insights, including:
+
 - Structured logging
 - Request tracing
 - Performance metrics

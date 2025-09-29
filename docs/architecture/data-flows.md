@@ -1,17 +1,25 @@
-# ARTAgent Voice AI - Data Architecture & Redis Implementation
+# :material-database-outline: Data Architecture & Flow Patterns
 
-> **📚 Microsoft Learn Resources:**
-> - [Azure Cache for Redis Overview](https://learn.microsoft.com/en-us/azure/azure-cache-for-redis/cache-overview) - High-performance in-memory data store
-> - [Azure Cosmos DB Use Cases](https://learn.microsoft.com/en-us/azure/cosmos-db/use-cases) - NoSQL database for modern applications
-> - [Azure Redis Key Scenarios](https://learn.microsoft.com/en-us/azure/azure-cache-for-redis/cache-overview#key-scenarios) - Session store and caching patterns
+!!! abstract "Three-Tier Data Architecture"
+    Sophisticated data architecture optimized for **real-time voice processing at scale** with hierarchical key organization, intelligent caching, and seamless data persistence for Azure Communication Services calls.
 
-## Overview
+## :material-chart-timeline-variant: Architecture Overview
 
-The ARTAgent Voice AI Backend employs a sophisticated three-tier data architecture optimized for real-time voice processing at scale. This system provides hierarchical key organization, intelligent caching, and seamless data persistence for Azure Communication Services (ACS) calls and conversation sessions.
+!!! success "Performance-Optimized Storage Strategy"
+    The system employs a strategic **three-tier data storage hierarchy** optimized for different access patterns and performance requirements.
 
-## Three-Tier Data Architecture
+### :material-layers: Storage Hierarchy
 
-The system employs a strategic data storage hierarchy optimized for different access patterns and performance requirements:
+| :material-speedometer: Tier | :material-timer: Access Time | :material-database: Use Cases | :material-chart-line: Capacity |
+|------|-------------|-------------|------------|
+| **🔥 Application Memory** | Microseconds | Active call state, audio buffers, real-time metrics | Limited by RAM |
+| **⚡ Redis Enterprise** | Sub-second | Conversation context, session history, worker affinity | 10GB - 1TB |
+| **📚 Cosmos DB** | 1-5 seconds | Persistent conversations, analytics, audit logs | Unlimited |
+
+!!! info "Microsoft Learn Resources"
+    - **[Azure Cache for Redis Overview](https://learn.microsoft.com/en-us/azure/azure-cache-for-redis/cache-overview)** - High-performance in-memory data store
+    - **[Azure Cosmos DB Use Cases](https://learn.microsoft.com/en-us/azure/cosmos-db/use-cases)** - NoSQL database for modern applications
+    - **[Azure Redis Key Scenarios](https://learn.microsoft.com/en-us/azure/azure-cache-for-redis/cache-overview#key-scenarios)** - Session store and caching patterns
 
 ```mermaid
 flowchart TD
@@ -58,7 +66,7 @@ flowchart TD
 
 | Data Type | Memory | Redis | Cosmos | Access Pattern | Reasoning |
 |-----------|--------|-------|--------|----------------|-----------|
-| **WebSocket Connections** | ✅ | ❌ | ❌ | 100+ ops/sec | Process-specific, ultra-low latency |
+| **WebSocket Connections** | ✅ | ❌ | ❌ | High throughput | Process-specific, ultra-low latency |
 | **Audio Buffers** | ✅ | ❌ | ❌ | Real-time | High-frequency, temporary |
 | **Conversation Context** | ❌ | ✅ | ❌ | 10-50 ops/sec | Session persistence, shared workers |
 | **TTS Cache** | ❌ | ✅ | ❌ | Variable | Shared across calls, time-limited |
@@ -199,21 +207,6 @@ sequenceDiagram
 - **Monitor TTL expiration** for critical session data
 - **Use async operations** throughout for non-blocking performance
 
-### Environment Configuration
-```yaml
-# Production
-ENVIRONMENT: prod
-REDIS_HOST: redis-cluster.region.cache.windows.net
-REDIS_PORT: 6380
-REDIS_SSL: true
-TTL_MULTIPLIER: 2.0  # Extended TTLs for production
-
-# Development  
-ENVIRONMENT: dev
-REDIS_HOST: localhost
-REDIS_PORT: 6379
-TTL_MULTIPLIER: 0.5  # Shorter TTLs for testing
-```
 
 ### Monitoring & Production Readiness
 
@@ -247,7 +240,7 @@ TTL_MULTIPLIER: 0.5  # Shorter TTLs for testing
 ```yaml
 # P0 Critical Alert Thresholds
 redis_availability:
-    threshold: "availability < 99.9% for 30 seconds"
+    threshold: "availability degradation for 30 seconds"
     escalation: "page on-call immediately"
 
 memory_pressure:

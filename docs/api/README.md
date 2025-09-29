@@ -4,7 +4,7 @@ Comprehensive REST API and WebSocket documentation for the Real-Time Voice Agent
 
 ## Quick Start
 
-The API provides enterprise-grade Azure integrations for voice-enabled applications:
+The API provides comprehensive Azure integrations for voice-enabled applications:
 
 - **[Azure Communication Services](https://learn.microsoft.com/en-us/azure/communication-services/concepts/call-automation/audio-streaming-concept)** - Call automation and bidirectional media streaming
 - **[Azure Speech Services](https://learn.microsoft.com/en-us/azure/ai-services/speech-service/speech-to-text)** - Neural text-to-speech and speech recognition  
