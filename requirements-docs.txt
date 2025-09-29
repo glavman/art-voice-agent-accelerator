@@ -4,7 +4,7 @@ mkdocs-material>=9.4.0
 mkdocstrings[python]>=0.20.0
 pymdown-extensions>=10.0.0
 mkdocs-mermaid2-plugin>=1.2.2
-# neoteroi-mkdocs>=1.2.0  # Temporarily disabled due to MkDocs compatibility issue
+neoteroi-mkdocs>=1.2.0  # Temporarily disabled due to MkDocs compatibility issue
 
 # Minimal dependencies for mkdocstrings to document the code
 fastapi>=0.104.0
