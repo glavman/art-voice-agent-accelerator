@@ -19,7 +19,7 @@
         - **[Azure Free Account Setup](https://learn.microsoft.com/en-us/azure/cost-management-billing/manage/create-free-services)** - Step-by-step account creation
         - **[Azure CLI Fundamentals](https://learn.microsoft.com/en-us/cli/azure/get-started-with-azure-cli)** - Essential CLI commands
 
-## :material-path: Learning Paths
+## :material-school: Learning Paths
 
 === "🚀 Quick Start (15 minutes)"
     **Get up and running fast**:

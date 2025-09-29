@@ -32,7 +32,6 @@ The repository follows a modular, microservice-oriented structure with clear sep
 ├── 📄 requirements.txt                    # Python dependencies (production)
 ├── 📄 requirements-codequality.txt        # Development tools (black, flake8, etc.)
 ├── 📄 requirements-docs.txt               # Documentation dependencies
-├── 📄 setup.py                            # Python package setup
 │
 ├── 📁 apps/                               # Deployable applications
 │   ├── 📄 README.md                       # Apps overview and usage
