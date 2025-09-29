@@ -9,6 +9,7 @@ on:
       - 'docs/**'
       - 'mkdocs.yml'
       - 'requirements-docs.txt'
+      - '.github/workflows/docs.yml'
   workflow_dispatch:
 # Permissions for GitHub Actions deployment
 permissions:
