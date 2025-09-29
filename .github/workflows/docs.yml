@@ -89,7 +89,10 @@ jobs:
 
       - name: Deploy docs
         uses: mhausenblas/mkdocs-deploy-gh-pages@master
-        # Or use mhausenblas/mkdocs-deploy-gh-pages@nomaterial to build without the mkdocs-material theme
         env:
           GITHUB_TOKEN: ${{ secrets.PERSONAL_TOKEN }}
           CONFIG_FILE: mkdocs.yml
+          REQUIREMENTS: requirements-docs.txt
+          # Set dummy Azure env vars for build
+          AZURE_SPEECH_KEY: "dummy-key-for-docs"
+          AZURE_SPEECH_REGION: "eastus"
