@@ -75,6 +75,8 @@ jobs:
       # - name: Deploy to GitHub Pages
       #   id: deployment
       #   uses: actions/deploy-pages@v3
+      - name: Checkout main
+        uses: actions/checkout@v2
 
       - name: Deploy docs
         uses: mhausenblas/mkdocs-deploy-gh-pages@master
