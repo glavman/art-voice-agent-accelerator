@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - feature/mkdocs-v2
     paths:
       - 'docs/**'
       - 'mkdocs.yml'
@@ -63,7 +62,6 @@ jobs:
   #         path: ./site
 
   deploy:
-    # if: github.ref == 'refs/heads/main'
     environment:
       name: github-pages
     runs-on: ubuntu-latest
