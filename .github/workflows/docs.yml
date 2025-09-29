@@ -4,28 +4,17 @@ on:
   push:
     branches:
       - main
-      - feature/mkdocs-v2
-    paths:
-      - 'docs/**'
-      - 'mkdocs.yml'
-      - 'requirements-docs.txt'
-    
-  pull_request:
-    branches:
-      - main
     paths:
       - 'docs/**'
       - 'mkdocs.yml'
       - 'requirements-docs.txt'
 
-# Sets permissions of the GITHUB_TOKEN to allow deployment to GitHub Pages
+# Permissions for GitHub Actions deployment
 permissions:
   contents: read
   pages: write
   id-token: write
 
-# Allow only one concurrent deployment, skipping runs queued between the run in-progress and latest queued.
-# However, do NOT cancel in-progress runs as we want to allow these production deployments to complete.
 concurrency:
   group: "pages"
   cancel-in-progress: false
@@ -44,30 +33,14 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y portaudio19-dev
-
-      - name: Cache dependencies
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements*.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-
-
       - name: Install documentation dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements-docs.txt
 
-      - name: Install project dependencies (for mkdocstrings)
+      - name: Install minimal project dependencies
         run: |
-          # Only install minimal dependencies needed for docs, not full Azure SDK
-          pip install fastapi pydantic uvicorn
-          # Install the project in editable mode so mkdocstrings can import it
-          # pip install -e .
+          pip install fastapi pydantic uvicorn starlette
         continue-on-error: true
 
       - name: Setup Pages
@@ -77,22 +50,10 @@ jobs:
       - name: Build documentation
         run: |
           mkdocs build --clean --strict
+          touch ./site/.nojekyll
         env:
-          # Set a dummy Azure Speech key for documentation build
           AZURE_SPEECH_KEY: "dummy-key-for-docs"
           AZURE_SPEECH_REGION: "eastus"
-          # Disable Azure SDK authentication attempts
-          AZURE_CORE_DISABLE_CONNECTION_SHARING: "true"
-          # Skip Azure identity chain that might try to connect
-          AZURE_IDENTITY_DISABLE_CP1: "true"
-          # Disable various Azure authentication methods
-          MSI_ENDPOINT: ""
-          MSI_SECRET: ""
-          AZURE_CLIENT_ID: ""
-          AZURE_CLIENT_SECRET: ""
-          AZURE_TENANT_ID: ""
-          # Set to offline mode for documentation builds
-          DOCS_BUILD_MODE: "true"
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
@@ -100,7 +61,7 @@ jobs:
           path: ./site
 
   deploy:
-    # if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main'
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -110,6 +71,14 @@ jobs:
       pages: write
       id-token: write
     steps:
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v3
+      # - name: Deploy to GitHub Pages
+      #   id: deployment
+      #   uses: actions/deploy-pages@v3
+
+      - name: Deploy docs
+        uses: mhausenblas/mkdocs-deploy-gh-pages@master
+        # Or use mhausenblas/mkdocs-deploy-gh-pages@nomaterial to build without the mkdocs-material theme
+        env:
+          GITHUB_TOKEN: ${{ secrets.PERSONAL_TOKEN }}
+          CONFIG_FILE: mkdocs.yml
+          REQUIREMENTS: requirements-docs.txt
