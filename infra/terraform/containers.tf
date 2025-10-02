@@ -309,7 +309,7 @@ resource "azurerm_container_app" "backend" {
 
       env {
         name  = "AZURE_SPEECH_DOMAIN_ENDPOINT"
-        value = module.ai_foundry.openai_endpoint
+        value = module.ai_foundry.endpoint
         # value = "https://${azurerm_cognitive_account.speech.custom_subdomain_name}.cognitiveservices.azure.com/"
       }
 
@@ -579,3 +579,4 @@ output "BACKEND_API_URL" {
   description = "Backend API URL"
   value       = var.backend_api_public_url != null ? var.backend_api_public_url : "https://${azurerm_container_app.backend.ingress[0].fqdn}"
 }
+
