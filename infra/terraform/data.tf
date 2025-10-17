@@ -70,7 +70,7 @@ resource "azapi_resource" "mongoCluster" {
   body = {
     properties = {
       administrator = {
-        userName = "adminuser"
+        userName = "cosmosadmin"
         password = random_password.cosmos_admin.result
       }
       authConfig = {
@@ -92,7 +92,7 @@ resource "azapi_resource" "mongoCluster" {
         targetMode = "Disabled"
       }
       publicNetworkAccess = var.cosmosdb_public_network_access_enabled ? "Enabled" : "Disabled"
-      serverVersion       = "5.0"
+      serverVersion       = "8.0"
       sharding = {
         shardCount = 1
       }

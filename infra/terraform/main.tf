@@ -20,7 +20,7 @@ terraform {
     }
     azapi = {
       source = "Azure/azapi"
-      version = "2.6.0"
+      version = ">= 2.6.0"
     }
   }
 }
@@ -40,7 +40,6 @@ provider "azurerm" {
 provider "azuread" {}
 
 provider "azapi" {
-  skip_provider_registration = false
 }
 
 # ============================================================================

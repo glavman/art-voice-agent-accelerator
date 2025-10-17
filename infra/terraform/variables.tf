@@ -58,7 +58,7 @@ variable "cosmosdb_location" {
 variable "cosmosdb_sku" {
   description = "SKU for Azure Cosmos DB (MongoDB Cluster)"
   type        = string
-  default     = "M10"
+  default     = "M30"
 }
 
 variable "cosmosdb_public_network_access_enabled" {
