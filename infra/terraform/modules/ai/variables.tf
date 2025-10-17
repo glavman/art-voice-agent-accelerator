@@ -14,6 +14,16 @@ variable "tags" {
   default     = {}
 }
 
+variable "public_network_access" {
+  description = "Public network access for the AI Foundry account."
+  default = "Enabled"
+
+  # validation {
+  #   condition     = contains(["Enabled", "Disabled"], var.publicNetworkAccess)
+  #   error_message = "Public network access must be either 'Enabled' or 'Disabled'."
+  # }
+}
+
 variable "disable_local_auth" {
   description = "Disable local (key-based) authentication for the AI Foundry account."
   type        = bool

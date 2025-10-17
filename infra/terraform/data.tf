@@ -62,14 +62,15 @@ resource "azurerm_role_assignment" "storage_principal_contributor" {
 # COSMOS DB (MONGODB API)
 # ============================================================================
 resource "azapi_resource" "mongoCluster" {
-  type      = "Microsoft.DocumentDB/mongoClusters@2025-04-01-preview"
+  type      = "Microsoft.DocumentDB/mongoClusters@2025-08-01-preview"
   parent_id = azurerm_resource_group.main.id
+  schema_validation_enabled = false
   name      = local.resource_names.cosmos
   location  = var.location
   body = {
     properties = {
       administrator = {
-        userName = "adminuser"
+        userName = "cosmosadmin"
         password = random_password.cosmos_admin.result
       }
       authConfig = {
@@ -91,7 +92,7 @@ resource "azapi_resource" "mongoCluster" {
         targetMode = "Disabled"
       }
       publicNetworkAccess = var.cosmosdb_public_network_access_enabled ? "Enabled" : "Disabled"
-      serverVersion       = "5.0"
+      serverVersion       = "8.0"
       sharding = {
         shardCount = 1
       }
