@@ -20,6 +20,7 @@ terraform {
     }
     azapi = {
       source = "Azure/azapi"
+      version = "2.6.0"
     }
   }
 }
@@ -88,7 +89,7 @@ locals {
     key_vault          = "kv-${local.resource_token}"
     speech             = "spch-${var.environment_name}-${local.resource_token}"
     openai             = "oai-${local.resource_token}"
-    cosmos             = "cosmos-${local.resource_token}"
+    cosmos             = "cosmos-cluster-${local.resource_token}"
     storage            = "st${local.resource_token}"
     redis              = "redis${local.resource_token}"
     acs                = "acs-${var.name}-${var.environment_name}-${local.resource_token}"
