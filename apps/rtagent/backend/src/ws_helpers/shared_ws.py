@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
+from contextlib import suppress
 from typing import Optional
 
 from fastapi import WebSocket, WebSocketDisconnect
@@ -21,6 +22,8 @@ from fastapi.websockets import WebSocketState
 
 from config import (
     ACS_STREAMING_MODE,
+    DEFAULT_VOICE_RATE,
+    DEFAULT_VOICE_STYLE,
     GREETING_VOICE_TTS,
     TTS_SAMPLE_RATE_ACS,
     TTS_SAMPLE_RATE_UI,
@@ -35,29 +38,45 @@ from utils.ml_logging import get_logger
 logger = get_logger("shared_ws")
 
 
+def _mirror_ws_state(ws: WebSocket, key: str, value) -> None:
+    """Store a copy of connection metadata on websocket.state for barge-in fallbacks."""
+    try:
+        setattr(ws.state, key, value)
+    except Exception:
+        # Defensive only; failure to mirror should never break the flow.
+        pass
+
+
 def _get_connection_metadata(ws: WebSocket, key: str, default=None):
-    """Helper to get metadata from connection manager safely."""
+    """Helper to get metadata from connection manager safely with websocket.state fallback."""
     try:
         conn_id = getattr(ws.state, "conn_id", None)
         if conn_id and hasattr(ws.app.state, "conn_manager"):
             connection = ws.app.state.conn_manager._conns.get(conn_id)
             if connection and connection.meta.handler:
-                return connection.meta.handler.get(key, default)
+                if key in connection.meta.handler:
+                    value = connection.meta.handler[key]
+                    _mirror_ws_state(ws, key, value)
+                    return value
     except Exception:
-        pass
-    return default
+        logger.debug("Metadata lookup failed for %s; using websocket.state fallback", key)
+    return getattr(ws.state, key, default)
 
 
-def _set_connection_metadata(ws: WebSocket, key: str, value):
-    """Helper to set metadata in connection manager safely."""
+def _set_connection_metadata(ws: WebSocket, key: str, value) -> bool:
+    """Helper to set metadata in connection manager safely, mirroring websocket.state."""
     try:
         conn_id = getattr(ws.state, "conn_id", None)
         if conn_id and hasattr(ws.app.state, "conn_manager"):
             connection = ws.app.state.conn_manager._conns.get(conn_id)
             if connection and connection.meta.handler:
                 connection.meta.handler[key] = value
-    except Exception:
-        pass
+                _mirror_ws_state(ws, key, value)
+                return True
+    except Exception as exc:
+        logger.debug("Failed to set metadata %s on connection: %s", key, exc)
+    _mirror_ws_state(ws, key, value)
+    return False
 
 
 def _lt_stop(latency_tool: Optional[LatencyTool], stage: str, ws: WebSocket, meta=None):
@@ -119,6 +138,9 @@ async def send_tts_audio(
     client_tier = None
     temp_synth = False
     session_id = getattr(ws.state, "session_id", None)
+    cancel_event: Optional[asyncio.Event] = _get_connection_metadata(
+        ws, "tts_cancel_event"
+    )
 
     try:
         (
@@ -151,8 +173,18 @@ async def send_tts_audio(
                 return  # Graceful degradation - don't crash the session
 
     try:
-        _set_connection_metadata(ws, "is_synthesizing", True)
-        _set_connection_metadata(ws, "audio_playing", True)
+        if cancel_event and cancel_event.is_set():
+            logger.info(
+                "[%s] Skipping TTS send due to active cancel signal",
+                session_id,
+            )
+            cancel_event.clear()
+            return
+
+        if not _set_connection_metadata(ws, "is_synthesizing", True):
+            logger.debug("[%s] Unable to flag is_synthesizing=True", session_id)
+        if not _set_connection_metadata(ws, "audio_playing", True):
+            logger.debug("[%s] Unable to flag audio_playing=True", session_id)
         # Reset any stale cancel request from prior barge-ins
         try:
             _set_connection_metadata(ws, "tts_cancel_requested", False)
@@ -168,14 +200,55 @@ async def send_tts_audio(
             f"TTS synthesis: voice={voice_to_use}, style={style}, rate={eff_rate} (run={run_id})"
         )
 
-        # Synthesize audio
-        pcm_bytes = synth.synthesize_to_pcm(
-            text=text,
-            voice=voice_to_use,
-            sample_rate=TTS_SAMPLE_RATE_UI,
-            style=style,
-            rate=eff_rate,
-        )
+        async def _synthesize() -> bytes:
+            return await asyncio.to_thread(
+                synth.synthesize_to_pcm,
+                text=text,
+                voice=voice_to_use,
+                sample_rate=TTS_SAMPLE_RATE_UI,
+                style=style,
+                rate=eff_rate,
+            )
+
+        synthesis_task = asyncio.create_task(_synthesize())
+        cancel_wait: Optional[asyncio.Task[None]] = None
+
+        try:
+            if cancel_event:
+                cancel_wait = asyncio.create_task(cancel_event.wait())
+                done, _ = await asyncio.wait(
+                    {synthesis_task, cancel_wait},
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+
+                if cancel_wait in done and cancel_event.is_set():
+                    synthesis_task.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await synthesis_task
+                    logger.info(
+                        "[%s] Cancelled TTS synthesis before completion (run=%s)",
+                        session_id,
+                        run_id,
+                    )
+                    return
+
+            pcm_bytes = await synthesis_task
+        except asyncio.CancelledError:
+            logger.debug("[%s] TTS synthesis task cancelled (run=%s)", session_id, run_id)
+            raise
+        finally:
+            if cancel_wait:
+                cancel_wait.cancel()
+                with suppress(asyncio.CancelledError):
+                    await cancel_wait
+
+        if cancel_event and cancel_event.is_set():
+            logger.info(
+                "[%s] TTS cancel signal detected post-synthesis; aborting send (run=%s)",
+                session_id,
+                run_id,
+            )
+            return
 
         _lt_stop(
             latency_tool,
@@ -201,7 +274,12 @@ async def send_tts_audio(
         for i, frame in enumerate(frames):
             # Barge-in: stop sending frames immediately if a cancel is requested
             try:
-                if _get_connection_metadata(ws, "tts_cancel_requested", False):
+                cancel_triggered = _get_connection_metadata(
+                    ws, "tts_cancel_requested", False
+                )
+                if cancel_event and cancel_event.is_set():
+                    cancel_triggered = True
+                if cancel_triggered:
                     logger.info(
                         f"🛑 UI TTS cancel detected; stopping frame send early (run={run_id})"
                     )
@@ -298,6 +376,8 @@ async def send_tts_audio(
             _set_connection_metadata(ws, "tts_cancel_requested", False)
         except Exception:
             pass
+        if cancel_event:
+            cancel_event.clear()
 
         # Enhanced pool management with dedicated clients
         if session_id:
@@ -331,11 +411,38 @@ async def send_response_to_acs(
     """Send TTS response to ACS phone call."""
     run_id = str(uuid.uuid4())[:8]
     voice_to_use = voice_name or GREETING_VOICE_TTS
-    style = voice_style or "conversational"
-    eff_rate = rate or "medium"
+    style_candidate = (voice_style or DEFAULT_VOICE_STYLE or "chat").strip()
+    style_key = style_candidate.lower()
+    if not style_candidate or style_key in {"neutral", "default", "none"}:
+        style = "chat"
+    elif style_key == "conversational":
+        style = "chat"
+    else:
+        style = style_candidate
+
+    rate_candidate = (rate or DEFAULT_VOICE_RATE or "+3%").strip()
+    if not rate_candidate:
+        eff_rate = "+3%"
+    elif rate_candidate.lower() == "medium":
+        eff_rate = "+3%"
+    else:
+        eff_rate = rate_candidate
+    logger.debug(
+        "ACS MEDIA: Using voice params (run=%s): voice=%s, style=%s, rate=%s",
+        run_id,
+        voice_to_use,
+        style,
+        eff_rate,
+    )
     frames: list[str] = []
     synth = None
     temp_synth = False
+    main_event_loop = None
+    playback_task: Optional[asyncio.Task] = None
+
+    acs_handler = getattr(ws, "_acs_media_handler", None)
+    if acs_handler:
+        main_event_loop = getattr(acs_handler, "main_event_loop", None)
 
     if latency_tool:
         try:
@@ -362,21 +469,61 @@ async def send_response_to_acs(
                 voice_to_use,
                 len(text),
             )
-            synth_future = asyncio.to_thread(
-                synth.synthesize_to_pcm,
-                text,
-                voice_to_use,
-                TTS_SAMPLE_RATE_ACS,
-                style,
-                eff_rate,
-            )
-            pcm_bytes = await asyncio.wait_for(synth_future, timeout=6.0)
+            playback_task = asyncio.current_task()
+            if main_event_loop and playback_task:
+                main_event_loop.current_playback_task = playback_task
+            try:
+                pcm_bytes = await asyncio.to_thread(
+                    synth.synthesize_to_pcm,
+                    text,
+                    voice_to_use,
+                    TTS_SAMPLE_RATE_ACS,
+                    style,
+                    eff_rate,
+                )
+            except RuntimeError as synth_err:
+                logger.warning(
+                    "ACS MEDIA: Primary TTS failed (run=%s). Retrying without style/rate. error=%s",
+                    run_id,
+                    synth_err,
+                )
+                pcm_bytes = await asyncio.to_thread(
+                    synth.synthesize_to_pcm,
+                    text,
+                    voice_to_use,
+                    TTS_SAMPLE_RATE_ACS,
+                    "",
+                    "",
+                )
 
             # Split into frames for ACS
             frames = SpeechSynthesizer.split_pcm_to_base64_frames(
                 pcm_bytes, sample_rate=TTS_SAMPLE_RATE_ACS
             )
 
+            if not frames and pcm_bytes:
+                frame_size_bytes = int(0.02 * TTS_SAMPLE_RATE_ACS * 2)
+                logger.warning(
+                    "ACS MEDIA: Frame split returned no frames; padding and retrying (run=%s)",
+                    run_id,
+                )
+                padded_pcm = pcm_bytes + b"\x00" * frame_size_bytes
+                frames = SpeechSynthesizer.split_pcm_to_base64_frames(
+                    padded_pcm, sample_rate=TTS_SAMPLE_RATE_ACS
+                )
+
+            frame_count = len(frames)
+            estimated_duration = frame_count * 0.02
+            total_bytes = len(pcm_bytes)
+            logger.debug(
+                "ACS MEDIA: Prepared frames (run=%s, frames=%s, bytes=%s, est_duration=%.2fs)",
+                run_id,
+                frame_count,
+                total_bytes,
+                estimated_duration,
+            )
+
+            sequence_id = 0
             for frame in frames:
                 if not _ws_is_connected(ws):
                     logger.info(
@@ -397,10 +544,19 @@ async def send_response_to_acs(
                     await ws.send_json(
                         {
                             "kind": "AudioData",
-                            "AudioData": {"data": frame},
+                            "AudioData": {"data": frame, "sequenceId": sequence_id},
                             "StopAudio": None,
                         }
                     )
+                    sequence_id += 1
+                    await asyncio.sleep(0.02)
+                except asyncio.CancelledError:
+                    logger.info(
+                        "ACS MEDIA: Frame loop cancelled (run=%s, seq=%s)",
+                        run_id,
+                        sequence_id,
+                    )
+                    raise
                 except Exception as e:
                     if not _ws_is_connected(ws):
                         logger.info(
@@ -417,9 +573,11 @@ async def send_response_to_acs(
                     break
 
             logger.info(
-                "ACS MEDIA: Completed TTS synthesis (run=%s, frames=%s)",
+                "ACS MEDIA: Completed TTS synthesis (run=%s, frames=%s, bytes=%s, duration=%.2fs)",
                 run_id,
-                len(frames),
+                frame_count,
+                total_bytes,
+                estimated_duration,
             )
 
             if frames:
@@ -457,6 +615,12 @@ async def send_response_to_acs(
                 (text[:40] + "...") if len(text) > 40 else text,
             )
             frames = []
+        except asyncio.CancelledError:
+            logger.info(
+                "ACS MEDIA: Playback cancelled by barge-in (run=%s)",
+                run_id,
+            )
+            raise
         except Exception as e:
             frames = []
             logger.error(
@@ -466,6 +630,12 @@ async def send_response_to_acs(
                 (text[:40] + "...") if len(text) > 40 else text,
             )
         finally:
+            if (
+                main_event_loop
+                and playback_task
+                and main_event_loop.current_playback_task is playback_task
+            ):
+                main_event_loop.current_playback_task = None
             _lt_stop(
                 latency_tool,
                 "tts:send_frames",
