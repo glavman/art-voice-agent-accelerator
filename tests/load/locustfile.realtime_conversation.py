@@ -20,7 +20,6 @@ WS_IGNORE_CLOSE_EXCEPTIONS = os.getenv("WS_IGNORE_CLOSE_EXCEPTIONS", "true").low
 
 ## For debugging websocket connections
 # websocket.enableTrace(True)
-# print("WS_URL =", os.environ.get("WS_URL"))
 
 #
 # --- Config ---

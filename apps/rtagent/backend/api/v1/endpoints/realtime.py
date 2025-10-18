@@ -452,6 +452,9 @@ async def _initialize_conversation_session(
     # Track background orchestration tasks for proper cleanup
     orchestration_tasks = set()
 
+    # Shared cancellation signal for TTS barge-in handling
+    tts_cancel_event = asyncio.Event()
+
     # Set up WebSocket state for orchestrator compatibility
     websocket.state.cm = memory_manager
     websocket.state.session_id = session_id
@@ -460,6 +463,7 @@ async def _initialize_conversation_session(
     websocket.state.is_synthesizing = False
     websocket.state.user_buffer = ""
     websocket.state.orchestration_tasks = orchestration_tasks  # Track background tasks
+    websocket.state.tts_cancel_event = tts_cancel_event
     # Capture event loop for thread-safe scheduling from STT callbacks
     try:
         websocket.state._loop = asyncio.get_running_loop()
@@ -477,6 +481,7 @@ async def _initialize_conversation_session(
             "lt": latency_tool,
             "is_synthesizing": False,
             "user_buffer": "",
+            "tts_cancel_event": tts_cancel_event,
         }
 
     # Helper function to access connection metadata
@@ -520,7 +525,13 @@ async def _initialize_conversation_session(
             # Check both synthesis flag and session audio state for barge-in
             is_synthesizing = get_metadata("is_synthesizing", False)
             audio_playing = get_metadata("audio_playing", False)
-
+            logger.info(
+                "[%s] partial cancel gate (is_syn=%s, playing=%s, cancel_flag=%s)",
+                session_id,
+                get_metadata("is_synthesizing", None),
+                get_metadata("audio_playing", None),
+                get_metadata("tts_cancel_requested", None),
+            )
             if is_synthesizing or audio_playing:
                 # Interrupt TTS synthesizer immediately
                 tts_client = get_metadata("tts_client")
@@ -532,6 +543,44 @@ async def _initialize_conversation_session(
                 set_metadata("audio_playing", False)
                 set_metadata("tts_cancel_requested", True)
 
+                cancel_event = get_metadata("tts_cancel_event")
+                if cancel_event:
+                    cancel_event.set()
+
+                async def _cancel_background_orchestration():
+                    tasks = getattr(websocket.state, "orchestration_tasks", set())
+                    active = [task for task in list(tasks) if task and not task.done()]
+                    if not active:
+                        return
+                    logger.info(
+                        "[%s] Cancelling %s orchestration task(s) due to partial barge-in",
+                        session_id,
+                        len(active),
+                    )
+                    for task in active:
+                        task.cancel()
+                    for task in active:
+                        try:
+                            await asyncio.wait_for(task, timeout=0.3)
+                        except (asyncio.CancelledError, asyncio.TimeoutError):
+                            pass
+                        except Exception as cancel_exc:  # noqa: BLE001
+                            logger.debug(
+                                "[%s] Orchestration cancel error: %s",
+                                session_id,
+                                cancel_exc,
+                            )
+                        finally:
+                            tasks.discard(task)
+
+                loop = getattr(websocket.state, "_loop", None)
+                if loop and loop.is_running():
+                    loop.call_soon_threadsafe(
+                        asyncio.create_task, _cancel_background_orchestration()
+                    )
+                else:
+                    asyncio.create_task(_cancel_background_orchestration())
+
                 # Notify UI to flush any buffered audio
                 cancel_msg = {
                     "type": "control",
@@ -540,7 +589,6 @@ async def _initialize_conversation_session(
                     "at": "partial",
                     "session_id": session_id,
                 }
-                loop = getattr(websocket.state, "_loop", None)
                 if loop and loop.is_running():
                     loop.call_soon_threadsafe(
                         asyncio.create_task,
@@ -1015,6 +1063,7 @@ async def _cleanup_conversation_session(
                 if connection.meta.handler:
                     connection.meta.handler["tts_client"] = None
                     connection.meta.handler["audio_playing"] = False
+                    connection.meta.handler["tts_cancel_event"] = None
 
                 #  Release session-specific AOAI client
                 if session_id:

@@ -1776,8 +1776,20 @@ class SpeechSynthesizer:
             rate: Speech rate
         """
         voice = voice or self.voice
-        style = style or "chat"
-        rate = rate or "+3%"
+
+        if style is None:
+            style_to_apply = "chat"
+        else:
+            style_to_apply = style.strip()
+            if not style_to_apply:
+                style_to_apply = None
+
+        if rate is None:
+            rate_to_apply = "+3%"
+        else:
+            rate_to_apply = rate.strip()
+            if not rate_to_apply:
+                rate_to_apply = None
 
         self._ensure_auth_token()
 
@@ -1796,13 +1808,13 @@ class SpeechSynthesizer:
         inner_content = sanitized_text
 
         # Apply prosody rate if specified
-        if rate:
-            inner_content = f'<prosody rate="{rate}">{inner_content}</prosody>'
+        if rate_to_apply:
+            inner_content = f'<prosody rate="{rate_to_apply}">{inner_content}</prosody>'
 
         # Apply style if specified
-        if style:
+        if style_to_apply:
             inner_content = (
-                f'<mstts:express-as style="{style}">{inner_content}</mstts:express-as>'
+                f'<mstts:express-as style="{style_to_apply}">{inner_content}</mstts:express-as>'
             )
 
         ssml = f"""<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xmlns:mstts="https://www.w3.org/2001/mstts" xml:lang="en-US">
@@ -1811,38 +1823,79 @@ class SpeechSynthesizer:
     </voice>
 </speak>"""
 
-        # Use audio_config=None for memory synthesis - NO AUDIO HARDWARE NEEDED
-        synthesizer = speechsdk.SpeechSynthesizer(
-            speech_config=self.cfg, audio_config=None
-        )
+        max_attempts = 4
+        retry_delay = 0.1
+        last_result = None
+        last_error_details = ""
 
-        result = synthesizer.speak_ssml_async(ssml).get()
+        for attempt in range(max_attempts):
+            synthesizer = speechsdk.SpeechSynthesizer(
+                speech_config=self.cfg, audio_config=None
+            )
 
-        # Check for 401 authentication error and retry with refresh if needed
-        if self._is_authentication_error(result):
-            error_details = getattr(result.cancellation_details, 'error_details', '')
-            logger.warning(f"Authentication error detected in PCM synthesis: {error_details}")
-            
-            # Try to refresh authentication and retry once
-            if self.refresh_authentication():
-                logger.info("Retrying PCM synthesis with refreshed authentication")
-                # Recreate synthesizer with new config and retry
-                synthesizer = speechsdk.SpeechSynthesizer(
-                    speech_config=self.cfg, audio_config=None
+            result = synthesizer.speak_ssml_async(ssml).get()
+            last_result = result
+
+            # Check for 401 authentication error and retry with refresh if needed
+            if self._is_authentication_error(result):
+                error_details = getattr(result.cancellation_details, "error_details", "")
+                logger.warning(
+                    "Authentication error detected in PCM synthesis (attempt=%s): %s",
+                    attempt + 1,
+                    error_details,
                 )
-                result = synthesizer.speak_ssml_async(ssml).get()
-            else:
+
+                if self.refresh_authentication():
+                    logger.info("Retrying PCM synthesis with refreshed authentication")
+                    continue
+
                 logger.error("Failed to refresh authentication for PCM synthesis")
+                break
 
-        if result.reason == speechsdk.ResultReason.Canceled:
-            cancellation = result.cancellation_details
-            print("Cancellation reason:", cancellation.reason)
-            print("Error details:", cancellation.error_details)
+            if result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
+                if attempt:
+                    logger.info("PCM synthesis succeeded on retry attempt %s", attempt + 1)
+                return result.audio_data  # raw PCM bytes
 
-        if result.reason != speechsdk.ResultReason.SynthesizingAudioCompleted:
-            raise RuntimeError(f"TTS failed: {result.reason}")
+            if result.reason == speechsdk.ResultReason.Canceled:
+                cancellation = result.cancellation_details
+                error_details = getattr(cancellation, "error_details", "")
+                last_error_details = error_details or "canceled"
+                logger.warning(
+                    "PCM synthesis canceled (attempt=%s): reason=%s error=%s (voice=%s, text_preview=%s)",
+                    attempt + 1,
+                    getattr(cancellation, "reason", "unknown"),
+                    error_details,
+                    voice,
+                    (text[:60] + "...") if len(text) > 60 else text,
+                )
 
-        return result.audio_data  # raw PCM bytes
+                if (
+                    attempt < max_attempts - 1
+                    and getattr(cancellation, "reason", None) == speechsdk.CancellationReason.Error
+                    and error_details
+                    and "Codec decoding is not started within 2s" in error_details
+                ):
+                    time.sleep(retry_delay * (attempt + 1))
+                    continue
+            else:
+                last_error_details = str(result.reason)
+                logger.warning(
+                    "PCM synthesis returned reason=%s (attempt=%s, voice=%s)",
+                    result.reason,
+                    attempt + 1,
+                    voice,
+                )
+
+            if attempt < max_attempts - 1:
+                time.sleep(retry_delay * (attempt + 1))
+                continue
+
+            break
+
+        if last_result and last_result.reason:
+            raise RuntimeError(f"TTS failed: {last_result.reason}")
+        raise RuntimeError(f"TTS failed: {last_error_details or 'unknown error'}")
 
     @staticmethod
     def split_pcm_to_base64_frames(
@@ -1851,8 +1904,35 @@ class SpeechSynthesizer:
         import base64
 
         frame_size = int(0.02 * sample_rate * 2)  # 20ms * sample_rate * 2 bytes/sample
-        return [
-            base64.b64encode(pcm_bytes[i : i + frame_size]).decode("utf-8")
-            for i in range(0, len(pcm_bytes), frame_size)
-            if len(pcm_bytes[i : i + frame_size]) == frame_size
-        ]
+        if frame_size <= 0:
+            raise ValueError("Frame size must be positive")
+
+        working_bytes = pcm_bytes
+        frames: list[str] = []
+
+        for attempt in range(2):
+            frames = []
+            for i in range(0, len(working_bytes), frame_size):
+                chunk = working_bytes[i : i + frame_size]
+                if not chunk:
+                    continue
+                if len(chunk) < frame_size:
+                    chunk = chunk + b"\x00" * (frame_size - len(chunk))
+                frames.append(base64.b64encode(chunk).decode("utf-8"))
+
+            if frames or not working_bytes:
+                break
+
+            remainder = len(working_bytes) % frame_size
+            if remainder == 0:
+                break
+
+            pad_length = frame_size - remainder
+            logger.debug(
+                "Padding PCM buffer to align frames (pad=%s, attempt=%s)",
+                pad_length,
+                attempt + 1,
+            )
+            working_bytes = working_bytes + b"\x00" * pad_length
+
+        return frames

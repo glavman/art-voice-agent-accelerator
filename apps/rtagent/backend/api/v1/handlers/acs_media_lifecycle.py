@@ -101,6 +101,7 @@ class ThreadBridge:
         self.main_loop: Optional[asyncio.AbstractEventLoop] = None
         # Create shorthand for call connection ID (last 8 chars)
         self.call_connection_id = "unknown"
+        self._route_turn_thread_ref: Optional[weakref.ReferenceType] = None
 
     def set_main_loop(
         self, loop: asyncio.AbstractEventLoop, call_connection_id: str = None
@@ -125,6 +126,13 @@ class ThreadBridge:
         if call_connection_id:
             self.call_connection_id = call_connection_id
 
+    def set_route_turn_thread(self, route_turn_thread: "RouteTurnThread") -> None:
+        """Store a weak reference to the RouteTurnThread for coordinated cancellation."""
+        try:
+            self._route_turn_thread_ref = weakref.ref(route_turn_thread)
+        except TypeError:
+            self._route_turn_thread_ref = None
+
     def schedule_barge_in(self, handler_func: Callable) -> None:
         """
         Schedule barge-in handler to execute on main event loop with priority.
@@ -146,6 +154,22 @@ class ThreadBridge:
                 f"[{self.call_connection_id}] No main loop for barge-in scheduling"
             )
             return
+
+        route_turn_thread = (
+            self._route_turn_thread_ref()
+            if self._route_turn_thread_ref is not None
+            else None
+        )
+
+        if route_turn_thread:
+            try:
+                asyncio.run_coroutine_threadsafe(
+                    route_turn_thread.cancel_current_processing(), self.main_loop
+                )
+            except Exception as exc:
+                logger.error(
+                    f"[{self.call_connection_id}] Failed to cancel route turn thread during barge-in: {exc}"
+                )
 
         try:
             asyncio.run_coroutine_threadsafe(handler_func(), self.main_loop)
@@ -535,6 +559,7 @@ class RouteTurnThread:
             kind=SpanKind.CLIENT,
             attributes={"speech.text": event.text, "speech.language": event.language},
         ):
+            coro = None
             try:
                 if not self.memory_manager:
                     logger.error(f"[{self.call_connection_id}] No memory manager available")
@@ -562,7 +587,7 @@ class RouteTurnThread:
                         )
 
                 if self.orchestrator_func:
-                    await self.orchestrator_func(
+                    coro = self.orchestrator_func(
                         cm=self.memory_manager,
                         transcript=event.text,
                         ws=self.websocket,
@@ -570,14 +595,30 @@ class RouteTurnThread:
                         is_acs=True,
                     )
                 else:
-                    await route_turn(
+                    coro = route_turn(
                         cm=self.memory_manager,
                         transcript=event.text,
                         ws=self.websocket,
                         is_acs=True,
                     )
+
+                if coro is None:
+                    return
+
+                self.current_response_task = asyncio.create_task(coro)
+                await self.current_response_task
+            except asyncio.CancelledError:
+                logger.info(f"[{self.call_connection_id}] Orchestrator processing cancelled")
+                raise
             except Exception as e:
                 logger.error(f"[{self.call_connection_id}] Error while processing speech with orchestrator: {e}")
+            finally:
+                if (
+                    self.current_response_task
+                    and not self.current_response_task.done()
+                ):
+                    self.current_response_task.cancel()
+                self.current_response_task = None
 
     async def _process_direct_text_playback(self, event: SpeechEvent):
         """
@@ -680,6 +721,7 @@ class RouteTurnThread:
                     await self.current_response_task
                 except asyncio.CancelledError:
                     pass
+            self.current_response_task = None
         except Exception as e:
             logger.error(f"[{self.call_connection_id}] Error cancelling processing: {e}")
 
@@ -1020,6 +1062,7 @@ class ACSMediaHandler:
             barge_in_handler=self.main_event_loop.handle_barge_in,
             speech_queue=self.speech_queue,
         )
+        self.thread_bridge.set_route_turn_thread(self.route_turn_thread)
 
         # Lifecycle management
         self.running = False

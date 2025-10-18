@@ -14,7 +14,6 @@ WS_IGNORE_CLOSE_EXCEPTIONS = os.getenv("WS_IGNORE_CLOSE_EXCEPTIONS", "true").low
 
 ## For debugging websocket connections
 # websocket.enableTrace(True)
-# print("LOCUST_HOST =", os.environ.get("LOCUST_HOST"))
 
 #
 # --- Config ---
@@ -164,7 +163,6 @@ class ACSUser(User):
             f"x-call-connection-id: {self.call_connection_id}",
             f"x-session-id: {self.call_connection_id}",
         ]
-        print(url)
         sslopt = {}
         if url.startswith("wss://"):
             sslopt = {
