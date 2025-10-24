@@ -1,4 +1,4 @@
-name: 🎯 Complete Deployment with AZD
+name: 🎯 Staging - AZD Deployment Orchestration
 
 on:
   workflow_dispatch:
@@ -25,7 +25,6 @@ on:
 
   push:
     branches:
-      - feature/staging-tf-env
       - useacases/finance_capitalmarkets
     paths:
       - 'infra/terraform/**'
