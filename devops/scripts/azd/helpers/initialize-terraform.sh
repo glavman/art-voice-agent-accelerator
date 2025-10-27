@@ -80,9 +80,9 @@ generate_names() {
     # Calculate remaining space: 24 (max) - 7 (tfstate) - 8 (suffix) = 9 chars for env name
     local max_env_length=9
     local short_env="${clean_env:0:$max_env_length}"
-    echo "tfstate${suffix}" # storage account
+    echo "tfstate${short_env}${suffix}" # storage account
     echo "tfstate" # container
-    echo "rg-tfstate-${env_name}-${suffix}" # resource group
+    echo "rg-tfstate-${short_env}-${suffix}" # resource group
 }
 
 # Create storage resources
