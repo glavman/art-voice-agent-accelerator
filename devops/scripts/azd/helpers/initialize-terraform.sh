@@ -337,7 +337,7 @@ main() {
                 log_warning "⚠️  Consider creating remote state storage for collaboration and safety."
                 
 
-                log_info ""
+                echo ""
                 log_info "Required environment variables for Azure Remote State:"
                 log_info "  RS_RESOURCE_GROUP  - Azure resource group containing the storage account"
                 log_info "  RS_CONTAINER_NAME  - Blob container name for storing Terraform state files"
