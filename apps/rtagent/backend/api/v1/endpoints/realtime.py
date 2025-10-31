@@ -57,6 +57,10 @@ from config import GREETING, ENABLE_AUTH_VALIDATION
 from apps.rtagent.backend.src.helpers import check_for_stopwords, receive_and_filter
 from src.tools.latency_tool import LatencyTool
 from apps.rtagent.backend.src.orchestration.artagent.orchestrator import route_turn
+from apps.rtagent.backend.src.orchestration.artagent.cm_utils import (
+    cm_get,
+    cm_set,
+)
 from apps.rtagent.backend.src.ws_helpers.shared_ws import (
     _get_connection_metadata,
     _set_connection_metadata,
@@ -467,6 +471,8 @@ async def _initialize_conversation_session(
     websocket.state.is_synthesizing = False
     websocket.state.audio_playing = False
     websocket.state.tts_cancel_requested = False
+    greeting_sent = memory_manager.get_value_from_corememory("greeting_sent", False)
+    websocket.state.greeting_sent = greeting_sent
     websocket.state.user_buffer = ""
     websocket.state.orchestration_tasks = orchestration_tasks  # Track background tasks
     websocket.state.tts_cancel_event = tts_cancel_event
@@ -491,6 +497,7 @@ async def _initialize_conversation_session(
             "tts_cancel_event": tts_cancel_event,
             "audio_playing": False,
             "tts_cancel_requested": False,
+            "greeting_sent": greeting_sent,
         }
 
         if handler is None or isinstance(handler, dict):
@@ -533,24 +540,55 @@ async def _initialize_conversation_session(
         else:
             set_metadata(key, value)
 
-    # Send greeting message using new envelope format
-    greeting_envelope = make_status_envelope(
-        GREETING,
-        sender="System",
-        topic="session",
-        session_id=session_id,
-    )
-    await websocket.app.state.conn_manager.send_to_connection(
-        conn_id, greeting_envelope
-    )
+    if not greeting_sent:
+        # Send greeting message using new envelope format
+        greeting_envelope = make_status_envelope(
+            GREETING,
+            sender="System",
+            topic="session",
+            session_id=session_id,
+        )
+        await websocket.app.state.conn_manager.send_to_connection(
+            conn_id, greeting_envelope
+        )
 
-    # Add greeting to conversation history
-    auth_agent = websocket.app.state.auth_agent
-    memory_manager.append_to_history(auth_agent.name, "assistant", GREETING)
+        # Add greeting to conversation history
+        auth_agent = websocket.app.state.auth_agent
+        memory_manager.append_to_history(auth_agent.name, "assistant", GREETING)
 
-    # Send TTS audio greeting
-    latency_tool = get_metadata("lt")
-    await send_tts_audio(GREETING, websocket, latency_tool=latency_tool)
+        # Send TTS audio greeting
+        latency_tool = get_metadata("lt")
+        await send_tts_audio(GREETING, websocket, latency_tool=latency_tool)
+
+        # Persist greeting state
+        set_metadata("greeting_sent", True)
+        cm_set(memory_manager, greeting_sent=True)
+        greeting_sent = True
+        redis_mgr = websocket.app.state.redis
+        try:
+            await memory_manager.persist_to_redis_async(redis_mgr)
+        except Exception as persist_exc:  # noqa: BLE001
+            logger.warning(
+                "[%s] Failed to persist greeting_sent flag: %s",
+                session_id,
+                persist_exc,
+            )
+    else:
+        active_agent = cm_get(memory_manager, "active_agent", None)
+        resume_text = (
+            f"{active_agent} is ready to continue assisting you."
+            if active_agent
+            else "Session resumed with your previous assistant."
+        )
+        resume_envelope = make_status_envelope(
+            resume_text,
+            sender=active_agent or "System",
+            topic="session",
+            session_id=session_id,
+        )
+        await websocket.app.state.conn_manager.send_to_connection(
+            conn_id, resume_envelope
+        )
 
     # Persist initial state to Redis
     await memory_manager.persist_to_redis_async(redis_mgr)
