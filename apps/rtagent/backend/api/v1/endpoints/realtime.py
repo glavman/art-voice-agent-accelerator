@@ -90,6 +90,9 @@ from apps.rtagent.backend.src.utils.auth import validate_acs_ws_auth, AuthError
 logger = get_logger("api.v1.endpoints.realtime")
 tracer = trace.get_tracer(__name__)
 
+# Sentinel for state lookups
+_STATE_SENTINEL = object()
+
 router = APIRouter()
 
 
@@ -512,8 +515,6 @@ async def _initialize_conversation_session(
             _set_connection_metadata(websocket, key, value)
 
     # Helper function to access connection metadata with websocket fallbacks
-    _STATE_SENTINEL = object()
-
     def get_metadata(key: str, default=None):
         value = getattr(websocket.state, key, _STATE_SENTINEL)
         if value is not _STATE_SENTINEL:
@@ -538,7 +539,13 @@ async def _initialize_conversation_session(
         if loop and loop.is_running():
             loop.call_soon_threadsafe(set_metadata, key, value)
         else:
-            set_metadata(key, value)
+            # Not thread-safe to call set_metadata directly if loop is None
+            logger.warning(
+                "[%s] set_metadata_threadsafe called with no running event loop; metadata update may not be thread-safe.",
+                session_id,
+            )
+            # Optionally, raise an exception instead of logging:
+            # raise RuntimeError("No running event loop for thread-safe metadata update")
 
     if not greeting_sent:
         # Send greeting message using new envelope format
@@ -797,8 +804,6 @@ async def _process_conversation_messages(
         try:
             # Get connection manager for this session
             conn_manager = websocket.app.state.conn_manager
-            connection = conn_manager._conns.get(conn_id)
-
             # Helper function to access connection metadata
             _STATE_SENTINEL = object()
 
