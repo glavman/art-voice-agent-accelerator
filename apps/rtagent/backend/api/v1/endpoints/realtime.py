@@ -57,7 +57,11 @@ from config import GREETING, ENABLE_AUTH_VALIDATION
 from apps.rtagent.backend.src.helpers import check_for_stopwords, receive_and_filter
 from src.tools.latency_tool import LatencyTool
 from apps.rtagent.backend.src.orchestration.artagent.orchestrator import route_turn
-from apps.rtagent.backend.src.ws_helpers.shared_ws import send_tts_audio
+from apps.rtagent.backend.src.ws_helpers.shared_ws import (
+    _get_connection_metadata,
+    _set_connection_metadata,
+    send_tts_audio,
+)
 from apps.rtagent.backend.src.ws_helpers.envelopes import (
     make_envelope,
     make_status_envelope,
@@ -461,6 +465,8 @@ async def _initialize_conversation_session(
     websocket.state.tts_client = tts_client
     websocket.state.lt = latency_tool  # ← KEY FIX: Orchestrator expects this
     websocket.state.is_synthesizing = False
+    websocket.state.audio_playing = False
+    websocket.state.tts_cancel_requested = False
     websocket.state.user_buffer = ""
     websocket.state.orchestration_tasks = orchestration_tasks  # Track background tasks
     websocket.state.tts_cancel_event = tts_cancel_event
@@ -474,7 +480,8 @@ async def _initialize_conversation_session(
     conn_manager = websocket.app.state.conn_manager
     connection = conn_manager._conns.get(conn_id)
     if connection:
-        connection.meta.handler = {
+        handler = connection.meta.handler
+        base_state = {
             "cm": memory_manager,
             "session_id": session_id,
             "tts_client": tts_client,
@@ -482,19 +489,49 @@ async def _initialize_conversation_session(
             "is_synthesizing": False,
             "user_buffer": "",
             "tts_cancel_event": tts_cancel_event,
+            "audio_playing": False,
+            "tts_cancel_requested": False,
         }
 
-    # Helper function to access connection metadata
+        if handler is None or isinstance(handler, dict):
+            merged = handler or {}
+            merged.update(base_state)
+            connection.meta.handler = merged
+        else:
+            for key, value in base_state.items():
+                setattr(handler, key, value)
+
+        for key, value in base_state.items():
+            _set_connection_metadata(websocket, key, value)
+
+    # Helper function to access connection metadata with websocket fallbacks
+    _STATE_SENTINEL = object()
+
     def get_metadata(key: str, default=None):
-        # Use connection metadata as single source of truth
-        if connection and connection.meta.handler:
-            return connection.meta.handler.get(key, default)
-        return default
+        value = getattr(websocket.state, key, _STATE_SENTINEL)
+        if value is not _STATE_SENTINEL:
+            return value
+        return _get_connection_metadata(websocket, key, default)
 
     def set_metadata(key: str, value):
-        # Use connection metadata as single source of truth
-        if connection and connection.meta.handler:
-            connection.meta.handler[key] = value
+        setattr(websocket.state, key, value)
+        if not _set_connection_metadata(websocket, key, value):
+            current_conn = conn_manager._conns.get(conn_id)
+            if current_conn:
+                handler = current_conn.meta.handler
+                if handler is None:
+                    current_conn.meta.handler = {key: value}
+                elif isinstance(handler, dict):
+                    handler[key] = value
+                else:
+                    setattr(handler, key, value)
+
+    def set_metadata_threadsafe(key: str, value):
+        loop = getattr(websocket.state, "_loop", None)
+        if loop and loop.is_running():
+            loop.call_soon_threadsafe(set_metadata, key, value)
+        else:
+            set_metadata(key, value)
 
     # Send greeting message using new envelope format
     greeting_envelope = make_status_envelope(
@@ -539,13 +576,17 @@ async def _initialize_conversation_session(
                     tts_client.stop_speaking()
 
                 # Clear both synthesis flag and audio state
-                set_metadata("is_synthesizing", False)
-                set_metadata("audio_playing", False)
-                set_metadata("tts_cancel_requested", True)
+                set_metadata_threadsafe("is_synthesizing", False)
+                set_metadata_threadsafe("audio_playing", False)
+                set_metadata_threadsafe("tts_cancel_requested", True)
 
                 cancel_event = get_metadata("tts_cancel_event")
                 if cancel_event:
-                    cancel_event.set()
+                    loop = getattr(websocket.state, "_loop", None)
+                    if loop and loop.is_running():
+                        loop.call_soon_threadsafe(cancel_event.set)
+                    else:
+                        cancel_event.set()
 
                 async def _cancel_background_orchestration():
                     tasks = getattr(websocket.state, "orchestration_tasks", set())
@@ -721,14 +762,26 @@ async def _process_conversation_messages(
             connection = conn_manager._conns.get(conn_id)
 
             # Helper function to access connection metadata
+            _STATE_SENTINEL = object()
+
             def get_metadata(key: str, default=None):
-                if connection and connection.meta.handler:
-                    return connection.meta.handler.get(key, default)
-                return default
+                value = getattr(websocket.state, key, _STATE_SENTINEL)
+                if value is not _STATE_SENTINEL:
+                    return value
+                return _get_connection_metadata(websocket, key, default)
 
             def set_metadata(key: str, value):
-                if connection and connection.meta.handler:
-                    connection.meta.handler[key] = value
+                setattr(websocket.state, key, value)
+                if not _set_connection_metadata(websocket, key, value):
+                    current_conn = conn_manager._conns.get(conn_id)
+                    if current_conn:
+                        handler = current_conn.meta.handler
+                        if handler is None:
+                            current_conn.meta.handler = {key: value}
+                        elif isinstance(handler, dict):
+                            handler[key] = value
+                        else:
+                            setattr(handler, key, value)
 
             message_count = 0
             while (
